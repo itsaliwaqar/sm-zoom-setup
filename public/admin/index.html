@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Zoom Automation Admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1a1a1a; }
+  header { background: #111827; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  header input { padding: 6px 8px; border-radius: 6px; border: 1px solid #374151; width: 260px; }
+  nav { display: flex; gap: 4px; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e5e7eb; overflow-x: auto; }
+  nav button { border: none; background: transparent; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  nav button.active { background: #111827; color: #fff; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  section { display: none; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+  section.active { display: block; }
+  h2 { margin-top: 0; font-size: 16px; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  form.wide { grid-template-columns: 1fr; }
+  label { font-size: 12px; color: #4b5563; display: flex; flex-direction: column; gap: 4px; }
+  input, select, textarea { padding: 7px 8px; border-radius: 6px; border: 1px solid #d1d5db; font: inherit; }
+  textarea { min-height: 90px; font-family: ui-monospace, monospace; font-size: 12px; }
+  button.submit { grid-column: 1 / -1; justify-self: start; background: #2563eb; color: #fff; border: none; padding: 9px 16px; border-radius: 6px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+  th { color: #6b7280; font-weight: 600; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .muted { color: #6b7280; font-size: 12px; }
+  .msg { font-size: 12px; margin-bottom: 10px; padding: 8px 10px; border-radius: 6px; }
+  .msg.err { background: #fef2f2; color: #b91c1c; }
+  .msg.ok { background: #f0fdf4; color: #15803d; }
+  .copy { cursor: pointer; color: #2563eb; text-decoration: underline; background: none; border: none; font: inherit; padding: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Zoom Automation Admin</h1>
+  <input id="apiKey" placeholder="X-API-Key" />
+</header>
+<nav id="tabs"></nav>
+<main id="sections"></main>
+
+<script>
+const TABS = ["series", "templates", "zoomEvents", "scheduledJobs", "registrationRoutes", "registrants", "shortLinks"];
+const LABELS = {
+  series: "Series", templates: "Templates", zoomEvents: "Zoom Events", scheduledJobs: "Scheduled Jobs",
+  registrationRoutes: "Registration Routes", registrants: "Registrants", shortLinks: "Short Links",
+};
+
+const apiKeyInput = document.getElementById("apiKey");
+apiKeyInput.value = localStorage.getItem("zoomAdminApiKey") || "";
+apiKeyInput.addEventListener("input", () => localStorage.setItem("zoomAdminApiKey", apiKeyInput.value));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKeyInput.value, ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const child of [].concat(children)) node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
+  return node;
+}
+
+function copyBtn(text) {
+  return el("button", { class: "copy", onclick: () => navigator.clipboard.writeText(text).catch(() => {}), text: "copy" });
+}
+
+function showMsg(container, message, ok) {
+  const existing = container.querySelector(".msg");
+  if (existing) existing.remove();
+  if (!message) return;
+  container.prepend(el("div", { class: `msg ${ok ? "ok" : "err"}`, text: message }));
+}
+
+// ---- Series ----
+async function renderSeries(section) {
+  section.innerHTML = "<h2>Series</h2>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Slug"), el("input", { name: "slug", required: "" })]),
+    el("label", {}, [document.createTextNode("Name"), el("input", { name: "name", required: "" })]),
+    el("label", {}, [document.createTextNode("Type"), el("select", { name: "type" }, [el("option", { value: "webinar", text: "webinar" }), el("option", { value: "meeting", text: "meeting" })])]),
+    el("button", { class: "submit", type: "submit", text: "Create series" }),
+  ]);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      await api("/api/series", { method: "POST", body: JSON.stringify(Object.fromEntries(fd)) });
+      showMsg(section, "Series created", true);
+      form.reset();
+      load();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+
+  const table = el("table");
+  section.appendChild(table);
+  async function load() {
+    const rows = await api("/api/series");
+    table.innerHTML = "<tr><th>Slug</th><th>Name</th><th>Type</th><th>Evergreen short link</th><th>ID</th></tr>";
+    for (const r of rows) {
+      table.appendChild(el("tr", {}, [
+        el("td", { text: r.slug }), el("td", { text: r.name }), el("td", { text: r.type }),
+        el("td", { text: r.evergreenShortCode ? `${location.origin}/s/${r.evergreenShortCode}` : "-" }),
+        el("td", {}, [el("code", { text: r.id }), copyBtn(r.id)]),
+      ]));
+    }
+  }
+  load();
+}
+
+// ---- Templates ----
+async function renderTemplates(section) {
+  section.innerHTML = "<h2>Templates</h2><p class=\"muted\">zoomPayload is the full Zoom create-webinar/meeting body (topic, duration, settings{...}). See README for examples.</p>";
+  const seriesOptions = (await api("/api/series")).map((s) => el("option", { value: s.id, text: `${s.name} (${s.slug})` }));
+  const form = el("form", { class: "wide" }, [
+    el("label", {}, [document.createTextNode("Series"), el("select", { name: "seriesId" }, seriesOptions)]),
+    el("label", {}, [document.createTextNode("Template name"), el("input", { name: "name", required: "" })]),
+    el("label", {}, [document.createTextNode("Host email"), el("input", { name: "hostEmail", type: "email", required: "" })]),
+    el("label", {}, [document.createTextNode("Zoom payload (JSON)"), el("textarea", { name: "zoomPayload" }, ['{\n  "topic": "Weekly Sales Webinar",\n  "duration": 60,\n  "settings": {\n    "approval_type": 0,\n    "registrants_email_notification": true\n  }\n}'])]),
+    el("button", { class: "submit", type: "submit", text: "Create template" }),
+  ]);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      const body = Object.fromEntries(fd);
+      body.zoomPayload = JSON.parse(body.zoomPayload);
+      await api("/api/templates", { method: "POST", body: JSON.stringify(body) });
+      showMsg(section, "Template created", true);
+      load();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+
+  const table = el("table");
+  section.appendChild(table);
+  async function load() {
+    const rows = await api("/api/templates");
+    table.innerHTML = "<tr><th>Name</th><th>Host</th><th>Series ID</th><th>ID</th></tr>";
+    for (const r of rows) {
+      table.appendChild(el("tr", {}, [el("td", { text: r.name }), el("td", { text: r.hostEmail }), el("td", { text: r.seriesId }), el("td", {}, [el("code", { text: r.id }), copyBtn(r.id)])]));
+    }
+  }
+  load();
+}
+
+// ---- Zoom Events (create now) ----
+async function renderZoomEvents(section) {
+  section.innerHTML = "<h2>Zoom Events</h2><p class=\"muted\">Create a webinar/meeting immediately from a template, or leave templateId blank and pass a full zoomPayload.</p>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Type"), el("select", { name: "type" }, [el("option", { value: "webinar" }), el("option", { value: "meeting" })])]),
+    el("label", {}, [document.createTextNode("Template ID"), el("input", { name: "templateId" })]),
+    el("label", {}, [document.createTextNode("Series ID"), el("input", { name: "seriesId" })]),
+    el("label", {}, [document.createTextNode("Start time (UTC ISO)"), el("input", { name: "startTime", placeholder: "2026-01-14T19:00:00Z", required: "" })]),
+    el("label", {}, [document.createTextNode("Host email (override)"), el("input", { name: "hostEmail" })]),
+    el("button", { class: "submit", type: "submit", text: "Create now" }),
+  ]);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+    try {
+      await api("/api/zoom/create", { method: "POST", body: JSON.stringify(fd) });
+      showMsg(section, "Event created in Zoom", true);
+      load();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+
+  const table = el("table");
+  section.appendChild(table);
+  async function load() {
+    const rows = await api("/api/zoom-events");
+    table.innerHTML = "<tr><th>Topic</th><th>Type</th><th>Start (UTC)</th><th>Status</th><th>Attendance</th><th>Short link</th><th>ID</th><th></th></tr>";
+    for (const r of rows) {
+      const syncBtn = el("button", {
+        class: "copy",
+        text: r.attendanceSyncedAt ? "re-sync attendance" : "sync attendance now",
+        onclick: async (ev) => {
+          ev.target.textContent = "syncing...";
+          try {
+            await api(`/api/zoom-events/${r.id}/sync-attendance`, { method: "POST" });
+            showMsg(section, `Attendance synced for "${r.topic}"`, true);
+            load();
+          } catch (err) { showMsg(section, err.message, false); }
+        },
+      });
+      table.appendChild(el("tr", {}, [
+        el("td", { text: r.topic }), el("td", { text: r.type }),
+        el("td", { text: new Date(r.startTimeUtc).toISOString() }),
+        el("td", { text: r.status }),
+        el("td", { text: r.attendanceSyncedAt ? `synced ${new Date(r.attendanceSyncedAt).toISOString()}` : "not yet synced" }),
+        el("td", {}, r.shortJoinUrl ? [el("code", { text: r.shortJoinUrl }), copyBtn(r.shortJoinUrl)] : ["-"]),
+        el("td", {}, [el("code", { text: r.id }), copyBtn(r.id)]),
+        el("td", {}, [syncBtn]),
+      ]));
+    }
+  }
+  load();
+  showMsg(section, "Attendance (who showed up) is pulled from Zoom automatically ~30 min after each event ends, and tags/updates the contact in GHL. Use \"sync attendance now\" to trigger it sooner.", true);
+}
+
+// ---- Scheduled Jobs ----
+async function renderScheduledJobs(section) {
+  section.innerHTML = "<h2>Scheduled Jobs</h2>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Mode"), el("select", { name: "mode" }, [el("option", { value: "recurring" }), el("option", { value: "once" })])]),
+    el("label", {}, [document.createTextNode("Series ID"), el("input", { name: "seriesId", required: "" })]),
+    el("label", {}, [document.createTextNode("Template ID"), el("input", { name: "templateId", required: "" })]),
+    el("label", {}, [document.createTextNode("Day of week (0=Sun, recurring)"), el("input", { name: "dayOfWeek", type: "number", min: "0", max: "6" })]),
+    el("label", {}, [document.createTextNode("Time HH:MM (recurring, in tz below)"), el("input", { name: "time", placeholder: "19:00" })]),
+    el("label", {}, [document.createTextNode("Timezone (recurring)"), el("input", { name: "tz", value: "America/New_York" })]),
+    el("label", {}, [document.createTextNode("Lead time days (recurring)"), el("input", { name: "leadTimeDays", type: "number", value: "7" })]),
+    el("label", {}, [document.createTextNode("Event start time UTC (once)"), el("input", { name: "eventStartTime", placeholder: "2026-02-01T19:00:00Z" })]),
+    el("button", { class: "submit", type: "submit", text: "Schedule" }),
+  ]);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    const body = { mode: fd.mode, seriesId: fd.seriesId, templateId: fd.templateId };
+    if (fd.mode === "recurring") {
+      body.recurrenceRule = { dayOfWeek: Number(fd.dayOfWeek), time: fd.time, tz: fd.tz };
+      body.leadTimeDays = Number(fd.leadTimeDays || 0);
+    } else {
+      body.eventStartTime = fd.eventStartTime;
+    }
+    try {
+      await api("/api/zoom/schedule", { method: "POST", body: JSON.stringify(body) });
+      showMsg(section, "Job scheduled", true);
+      load();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+
+  const table = el("table");
+  section.appendChild(table);
+  async function load() {
+    const rows = await api("/api/zoom/schedule");
+    table.innerHTML = "<tr><th>Mode</th><th>Status</th><th>Next run (UTC)</th><th>Series</th><th>Errors</th><th></th></tr>";
+    for (const r of rows) {
+      const del = el("button", { class: "copy", onclick: async () => { await api(`/api/zoom/schedule/${r.id}`, { method: "DELETE" }); load(); }, text: "delete" });
+      table.appendChild(el("tr", {}, [
+        el("td", { text: r.mode }), el("td", { text: r.status }),
+        el("td", { text: new Date(r.runAtUtc).toISOString() }),
+        el("td", { text: r.seriesId }), el("td", { text: r.lastError || "-" }), el("td", {}, [del]),
+      ]));
+    }
+  }
+  load();
+}
+
+// ---- Registration Routes ----
+async function renderRegistrationRoutes(section) {
+  section.innerHTML = "<h2>Registration Routes</h2><p class=\"muted\">Create a stable webhook URL to paste into ClickFunnels / GHL workflow / Zapier.</p>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Type"), el("select", { name: "type" }, [el("option", { value: "webinar" }), el("option", { value: "meeting" })])]),
+    el("label", {}, [document.createTextNode("Selection mode"), el("select", { name: "selectionMode" }, [el("option", { value: "upcoming" }), el("option", { value: "specific" })])]),
+    el("label", {}, [document.createTextNode("Series ID (upcoming)"), el("input", { name: "seriesId" })]),
+    el("label", {}, [document.createTextNode("Specific Zoom event ID"), el("input", { name: "specificZoomEventId" })]),
+    el("label", {}, [document.createTextNode("GHL workflow ID"), el("input", { name: "ghlWorkflowId", required: "" })]),
+    el("label", {}, [document.createTextNode("GHL location ID (optional override)"), el("input", { name: "ghlLocationId" })]),
+    el("button", { class: "submit", type: "submit", text: "Create route" }),
+  ]);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+    try {
+      const created = await api("/api/registration-routes", { method: "POST", body: JSON.stringify(fd) });
+      showMsg(section, `Created. Webhook URL: ${created.webhookUrl}`, true);
+      form.reset();
+      load();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+
+  const table = el("table");
+  section.appendChild(table);
+  async function load() {
+    const rows = await api("/api/registration-routes");
+    table.innerHTML = "<tr><th>Type</th><th>Mode</th><th>Enabled</th><th>Webhook URL</th></tr>";
+    for (const r of rows) {
+      table.appendChild(el("tr", {}, [
+        el("td", { text: r.type }), el("td", { text: r.selectionMode }), el("td", { text: String(r.enabled) }),
+        el("td", {}, [el("code", { text: r.webhookUrl }), copyBtn(r.webhookUrl)]),
+      ]));
+    }
+  }
+  load();
+}
+
+// ---- Registrants ----
+async function renderRegistrants(section) {
+  section.innerHTML = "<h2>Registrants</h2><p class=\"muted\">Pick a Zoom event (copy its ID from the Zoom Events tab) to see who registered and whether they showed up.</p>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Zoom Event ID"), el("input", { name: "zoomEventId", required: "" })]),
+    el("button", { class: "submit", type: "submit", text: "Load registrants" }),
+  ]);
+  const table = el("table");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    try {
+      const event = await api(`/api/zoom-events/${fd.zoomEventId}`);
+      table.innerHTML = "<tr><th>Email</th><th>Name</th><th>Attendance</th><th>Minutes</th><th>GHL Contact ID</th></tr>";
+      for (const r of event.registrants) {
+        table.appendChild(el("tr", {}, [
+          el("td", { text: r.email }), el("td", { text: [r.firstName, r.lastName].filter(Boolean).join(" ") }),
+          el("td", { text: r.attendanceStatus }), el("td", { text: r.attendedMinutes ?? "-" }),
+          el("td", {}, [el("code", { text: r.ghlContactId || "-" })]),
+        ]));
+      }
+      showMsg(section, `Loaded ${event.registrants.length} registrant(s) for "${event.topic}"`, true);
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+  section.appendChild(table);
+}
+
+// ---- Short Links ----
+async function renderShortLinks(section) {
+  section.innerHTML = "<h2>Short Links</h2>";
+  const form = el("form", {}, [
+    el("label", {}, [document.createTextNode("Target URL"), el("input", { name: "targetUrl", required: "" })]),
+    el("button", { class: "submit", type: "submit", text: "Create short link" }),
+  ]);
+  const result = el("div", { class: "muted" });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    try {
+      const created = await api("/api/short-links", { method: "POST", body: JSON.stringify(fd) });
+      result.textContent = `Created: ${created.shortUrl} -> ${created.targetUrl}`;
+      form.reset();
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(form);
+  section.appendChild(result);
+
+  const repointForm = el("form", {}, [
+    el("label", {}, [document.createTextNode("Short code"), el("input", { name: "code", required: "" })]),
+    el("label", {}, [document.createTextNode("New target URL"), el("input", { name: "targetUrl", required: "" })]),
+    el("button", { class: "submit", type: "submit", text: "Repoint" }),
+  ]);
+  repointForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(repointForm));
+    try {
+      const updated = await api(`/api/short-links/${fd.code}`, { method: "PATCH", body: JSON.stringify({ targetUrl: fd.targetUrl }) });
+      showMsg(section, `Repointed ${updated.shortUrl} -> ${updated.targetUrl}`, true);
+    } catch (err) { showMsg(section, err.message, false); }
+  });
+  section.appendChild(repointForm);
+}
+
+const RENDERERS = {
+  series: renderSeries, templates: renderTemplates, zoomEvents: renderZoomEvents,
+  scheduledJobs: renderScheduledJobs, registrationRoutes: renderRegistrationRoutes,
+  registrants: renderRegistrants, shortLinks: renderShortLinks,
+};
+
+const tabsEl = document.getElementById("tabs");
+const sectionsEl = document.getElementById("sections");
+const sectionNodes = {};
+for (const tab of TABS) {
+  const btn = el("button", { text: LABELS[tab], onclick: () => activate(tab) });
+  btn.dataset.tab = tab;
+  tabsEl.appendChild(btn);
+  const sec = el("section", {});
+  sectionNodes[tab] = sec;
+  sectionsEl.appendChild(sec);
+}
+
+function activate(tab) {
+  for (const btn of tabsEl.children) btn.classList.toggle("active", btn.dataset.tab === tab);
+  for (const [key, sec] of Object.entries(sectionNodes)) sec.classList.toggle("active", key === tab);
+  RENDERERS[tab](sectionNodes[tab]).catch((err) => showMsg(sectionNodes[tab], err.message, false));
+}
+
+activate("series");
+</script>
+</body>
+</html>
