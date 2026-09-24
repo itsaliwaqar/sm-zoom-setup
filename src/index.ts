@@ -16,6 +16,7 @@ import zoomEvents from "./routes/zoomEvents";
 import upcoming from "./routes/upcoming";
 import registrationRoutes from "./routes/registrationRoutes";
 import registerWebhook from "./routes/registerWebhook";
+import ghlFields from "./routes/ghlFields";
 import shortLinksAdmin from "./routes/shortLinksAdmin";
 import shortLinkRedirect from "./routes/shortLinkRedirect";
 
@@ -39,6 +40,7 @@ app.route("/api/zoom/schedule", zoomSchedule);
 app.route("/api/zoom-events", zoomEvents);
 app.route("/api/registration-routes", registrationRoutes);
 app.route("/api/short-links", shortLinksAdmin);
+app.route("/api/ghl/custom-fields", ghlFields);
 
 // Public: date/time lookup (join links only included when a valid X-API-Key is sent)
 app.route("/api/upcoming", upcoming);
@@ -48,6 +50,14 @@ app.route("/webhooks/register", registerWebhook);
 
 // Public: short link redirect
 app.route("/s", shortLinkRedirect);
+
+// Any uncaught error (e.g. a misconfigured Zoom/GHL/Sheets/SendBlue/Hyros credential, or a
+// downstream API rejecting a request) becomes a JSON error instead of Hono's plain-text default,
+// consistent with every other error response in this app.
+app.onError((err, c) => {
+  console.error(err);
+  return c.json({ error: err.message || "internal error" }, 500);
+});
 
 export default {
   fetch: app.fetch,

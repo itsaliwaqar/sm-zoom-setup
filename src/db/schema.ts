@@ -71,7 +71,12 @@ export const registrationRoutes = sqliteTable("registration_routes", {
   specificZoomEventId: text("specific_zoom_event_id").references(() => zoomEvents.id),
   ghlWorkflowId: text("ghl_workflow_id").notNull(),
   ghlLocationId: text("ghl_location_id").notNull(),
-  fieldMappingJson: text("field_mapping_json"), // {email:"email", firstName:"first_name", ...}
+  fieldMappingJson: text("field_mapping_json"), // {email:"email", firstName:"first_name", ...} - INCOMING payload -> contact fields
+  ghlTagsJson: text("ghl_tags_json"), // string[] - applied to the GHL contact at registration time
+  ghlOutputFieldsJson: text("ghl_output_fields_json"), // [{fieldId, fieldName, source, token?, staticValue?}] - additive to the 5 fixed fields
+  sheetsConfigJson: text("sheets_config_json"), // {enabled, spreadsheetId, sheetName, columns: [{header, source, token?, staticValue?}]}
+  sendblueConfigJson: text("sendblue_config_json"), // {enabled, tags, customVariables: [{label, source, token?, staticValue?}]}
+  hyrosConfigJson: text("hyros_config_json"), // {enabled, tags, source?}
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: createdAt(),
 });

@@ -104,6 +104,174 @@ async function tabSeries(section) {
 }
 
 /* ================= Templates ================= */
+/* ================= Zoom settings form (shared by Templates + Zoom Events) ================= */
+const ZOOM_FIELD_GROUPS = [
+  {
+    title: "Basics",
+    fields: [
+      { path: "topic", label: "Topic", type: "text", appliesTo: ["meeting", "webinar"] },
+      { path: "agenda", label: "Agenda", type: "textarea", appliesTo: ["meeting", "webinar"] },
+      { path: "duration", label: "Duration (minutes)", type: "number", appliesTo: ["meeting", "webinar"], default: 60 },
+      { path: "timezone", label: "Timezone", type: "text", appliesTo: ["meeting", "webinar"], default: "America/New_York" },
+      { path: "password", label: "Passcode (blank = auto-generated)", type: "text", appliesTo: ["meeting", "webinar"] },
+    ],
+  },
+  {
+    title: "Video",
+    fields: [
+      { path: "settings.host_video", label: "Host video on by default", type: "boolean", appliesTo: ["meeting", "webinar"] },
+      { path: "settings.panelists_video", label: "Panelists video on by default", type: "boolean", appliesTo: ["webinar"] },
+      { path: "settings.hd_video", label: "HD video", type: "boolean", appliesTo: ["webinar"] },
+    ],
+  },
+  {
+    title: "Audio",
+    fields: [{ path: "settings.audio", label: "Audio options", type: "select", options: ["both", "telephony", "voip"], appliesTo: ["meeting", "webinar"] }],
+  },
+  {
+    title: "Registration & Approval",
+    fields: [
+      { path: "settings.approval_type", label: "Approval", type: "select", options: [{ value: 0, label: "Automatically approve" }, { value: 1, label: "Manually approve" }, { value: 2, label: "No registration required" }], appliesTo: ["meeting", "webinar"] },
+      { path: "settings.registrants_email_notification", label: "Email registrants on registration", type: "boolean", appliesTo: ["meeting", "webinar"] },
+      { path: "settings.registrants_confirmation_email", label: "Send registrant confirmation email", type: "boolean", appliesTo: ["meeting", "webinar"] },
+      { path: "settings.close_registration", label: "Close registration after event starts", type: "boolean", appliesTo: ["webinar"] },
+      { path: "settings.contact_name", label: "Registration contact name", type: "text", appliesTo: ["webinar"] },
+      { path: "settings.contact_email", label: "Registration contact email", type: "text", appliesTo: ["webinar"] },
+    ],
+  },
+  {
+    title: "Security",
+    fields: [
+      { path: "settings.waiting_room", label: "Waiting room", type: "boolean", appliesTo: ["meeting"] },
+      { path: "settings.join_before_host", label: "Allow join before host", type: "boolean", appliesTo: ["meeting"] },
+      { path: "settings.mute_upon_entry", label: "Mute participants on entry", type: "boolean", appliesTo: ["meeting", "webinar"] },
+      { path: "settings.meeting_authentication", label: "Require authenticated users", type: "boolean", appliesTo: ["meeting", "webinar"] },
+    ],
+  },
+  {
+    title: "Recording",
+    fields: [{ path: "settings.auto_recording", label: "Auto recording", type: "select", options: ["none", "local", "cloud"], appliesTo: ["meeting", "webinar"] }],
+  },
+  {
+    title: "Webinar options",
+    fields: [
+      { path: "settings.practice_session", label: "Enable practice session", type: "boolean", appliesTo: ["webinar"] },
+      { path: "settings.allow_multiple_devices", label: "Allow attendees on multiple devices", type: "boolean", appliesTo: ["webinar"] },
+      { path: "settings.question_and_answer.enable", label: "Enable Q&A", type: "boolean", appliesTo: ["webinar"] },
+    ],
+  },
+  {
+    title: "Hosts",
+    fields: [{ path: "settings.alternative_hosts", label: "Alternative hosts (comma-separated emails)", type: "text", appliesTo: ["meeting", "webinar"] }],
+  },
+];
+
+function getPath(obj, path) {
+  return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setPath(obj, path, value) {
+  const parts = path.split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur[parts[i]] = cur[parts[i]] ?? {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+function deepMerge(base, override) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(override || {})) {
+    if (v && typeof v === "object" && !Array.isArray(v) && base[k] && typeof base[k] === "object") out[k] = deepMerge(base[k], v);
+    else out[k] = v;
+  }
+  return out;
+}
+
+// getType() is called live (not just once) so the form reacts when the caller's type/series
+// picker changes - call the returned `refresh()` from that picker's change handler.
+function buildZoomSettingsForm(getType, initialPayload = {}) {
+  const controls = []; // {path, appliesTo, wrapper, getValue}
+  const groupNodes = [];
+
+  for (const group of ZOOM_FIELD_GROUPS) {
+    const grid = el("div", { class: "grid sm:grid-cols-2 gap-x-4 gap-y-3" });
+    for (const f of group.fields) {
+      const current = getPath(initialPayload, f.path) ?? f.default;
+      let controlEl, getValue, wrapperCls = "flex flex-col gap-1.5";
+
+      if (f.type === "boolean") {
+        const checkbox = el("input", { type: "checkbox", class: "rounded border-slate-300 dark:border-slate-600" });
+        checkbox.checked = Boolean(current);
+        controlEl = el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 py-2 cursor-pointer" }, [checkbox, el("span", { text: f.label })]);
+        getValue = () => checkbox.checked;
+        wrapperCls = "";
+      } else if (f.type === "select") {
+        const opts = f.options.map((o) => (typeof o === "object" ? o : { value: o, label: o }));
+        const sel = select(opts, {});
+        if (current !== undefined) sel.value = String(current);
+        controlEl = el("div", { class: "flex flex-col gap-1.5" }, [el("span", { class: "text-sm font-medium text-slate-700 dark:text-slate-300", text: f.label }), sel]);
+        getValue = () => {
+          const raw = sel.value;
+          const match = opts.find((o) => String(o.value) === raw);
+          return match && typeof match.value === "number" ? match.value : raw;
+        };
+      } else if (f.type === "textarea") {
+        const ta = textarea({});
+        ta.value = current ?? "";
+        controlEl = el("div", { class: "flex flex-col gap-1.5" }, [el("span", { class: "text-sm font-medium text-slate-700 dark:text-slate-300", text: f.label }), ta]);
+        getValue = () => ta.value || undefined;
+      } else {
+        const inp = input({ type: f.type === "number" ? "number" : "text" });
+        inp.value = current ?? "";
+        controlEl = el("div", { class: "flex flex-col gap-1.5" }, [el("span", { class: "text-sm font-medium text-slate-700 dark:text-slate-300", text: f.label }), inp]);
+        getValue = () => (inp.value === "" ? undefined : f.type === "number" ? Number(inp.value) : inp.value);
+      }
+
+      const wrapper = el("div", { class: wrapperCls }, [controlEl]);
+      grid.appendChild(wrapper);
+      controls.push({ path: f.path, appliesTo: f.appliesTo, wrapper, getValue });
+    }
+    const groupNode = el("div", {}, [el("h3", { class: "text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-2", text: group.title }), grid]);
+    groupNodes.push(groupNode);
+  }
+
+  const advancedTextarea = textarea({ placeholder: '{\n  "settings": { "some_setting": true }\n}' });
+  const advanced = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-3" }, [
+    el("summary", { class: "text-sm font-medium text-slate-600 dark:text-slate-300 cursor-pointer", text: "Advanced (raw JSON override)" }),
+    el("p", { class: "text-xs text-slate-400 mt-2 mb-2", text: "Merged on top of the settings above - use for anything not listed here." }),
+    advancedTextarea,
+  ]);
+
+  const container = el("div", { class: "flex flex-col gap-5" }, [...groupNodes, advanced]);
+
+  function refresh() {
+    const type = getType();
+    for (const c of controls) c.wrapper.classList.toggle("hidden", !c.appliesTo.includes(type));
+  }
+  refresh();
+
+  function getPayload() {
+    const type = getType();
+    let result = {};
+    for (const c of controls) {
+      if (!c.appliesTo.includes(type)) continue;
+      const value = c.getValue();
+      if (value === undefined || value === "") continue;
+      setPath(result, c.path, value);
+    }
+    if (advancedTextarea.value.trim()) {
+      try {
+        result = deepMerge(result, JSON.parse(advancedTextarea.value));
+      } catch {
+        throw new Error("Advanced JSON override is not valid JSON");
+      }
+    }
+    return result;
+  }
+
+  return { container, getPayload, refresh };
+}
+
 async function tabTemplates(section) {
   section.appendChild(pageHeader("Templates", "A reusable Zoom create-payload (topic, duration, settings) tied to a series."));
 
@@ -112,13 +280,20 @@ async function tabTemplates(section) {
 
   const seriesRows = await api("/api/series");
   const seriesOptions = seriesRows.map((s) => ({ value: s.id, label: `${s.name} (${s.slug})` }));
+  const seriesById = Object.fromEntries(seriesRows.map((s) => [s.id, s]));
 
-  const form = el("form", { class: "grid sm:grid-cols-2 gap-3" }, [
-    field("Series", select(seriesOptions.length ? seriesOptions : [{ value: "", label: "Create a series first" }], { name: "seriesId" })),
-    field("Template name", input({ name: "name", required: true })),
-    field("Host email", input({ name: "hostEmail", type: "email", required: true })),
-    el("div", { class: "sm:col-span-2" }, field("Zoom payload (JSON)", textarea({ name: "zoomPayload", text: JSON.stringify({ topic: "Weekly Sales Webinar", duration: 60, settings: { approval_type: 0, registrants_email_notification: true } }, null, 2) }))),
-    btn("Create template", { type: "submit", icon: "plus", cls: "sm:col-span-2 justify-center sm:w-fit" }),
+  const seriesSelect = select(seriesOptions.length ? seriesOptions : [{ value: "", label: "Create a series first" }], { name: "seriesId" });
+  const zoomForm = buildZoomSettingsForm(() => seriesById[seriesSelect.value]?.type || "webinar", { topic: "Weekly Sales Webinar" });
+  seriesSelect.addEventListener("change", () => zoomForm.refresh());
+
+  const form = el("form", { class: "flex flex-col gap-5" }, [
+    el("div", { class: "grid sm:grid-cols-2 gap-3" }, [
+      field("Series", seriesSelect),
+      field("Template name", input({ name: "name", required: true })),
+      field("Host email", input({ name: "hostEmail", type: "email", required: true })),
+    ]),
+    zoomForm.container,
+    btn("Create template", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" }),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
 
@@ -139,8 +314,7 @@ async function tabTemplates(section) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const body = Object.fromEntries(new FormData(form));
-      body.zoomPayload = JSON.parse(body.zoomPayload);
+      const body = { seriesId: seriesSelect.value, name: form.elements.name.value, hostEmail: form.elements.hostEmail.value, zoomPayload: zoomForm.getPayload() };
       await api("/api/templates", { method: "POST", body: JSON.stringify(body) });
       banner(msgHost, "Template created.", "ok");
       load();
@@ -159,13 +333,27 @@ async function tabEvents(section) {
   const msgHost = el("div", {});
   section.appendChild(msgHost);
 
-  const form = el("form", { class: "grid sm:grid-cols-2 gap-3" }, [
-    field("Type", select([{ value: "webinar", label: "Webinar" }, { value: "meeting", label: "Meeting" }], { name: "type" })),
-    field("Template ID", input({ name: "templateId", placeholder: "optional" })),
-    field("Series ID", input({ name: "seriesId", placeholder: "optional" })),
-    field("Start time (UTC ISO)", input({ name: "startTime", required: true, placeholder: "2026-01-14T19:00:00Z" })),
-    field("Host email (override)", input({ name: "hostEmail", placeholder: "optional if template supplies it" })),
-    btn("Create in Zoom now", { type: "submit", icon: "plus", cls: "sm:col-span-2 justify-center sm:w-fit" }),
+  const typeSelect = select([{ value: "webinar", label: "Webinar" }, { value: "meeting", label: "Meeting" }], { name: "type" });
+  const templateIdInput = input({ name: "templateId", placeholder: "optional" });
+  const zoomForm = buildZoomSettingsForm(() => typeSelect.value, {});
+  typeSelect.addEventListener("change", () => zoomForm.refresh());
+
+  const zoomDetails = el("details", {}, [
+    el("summary", { class: "text-sm font-medium text-slate-600 dark:text-slate-300 cursor-pointer mb-1", text: "Zoom settings" }),
+    el("p", { class: "text-xs text-slate-400 mb-3", text: "Leave collapsed with a Template ID set to use the template's settings unchanged. Expand to override." }),
+    zoomForm.container,
+  ]);
+
+  const form = el("form", { class: "flex flex-col gap-5" }, [
+    el("div", { class: "grid sm:grid-cols-2 gap-3" }, [
+      field("Type", typeSelect),
+      field("Template ID", templateIdInput),
+      field("Series ID", input({ name: "seriesId", placeholder: "optional" })),
+      field("Start time (UTC ISO)", input({ name: "startTime", required: true, placeholder: "2026-01-14T19:00:00Z" })),
+      field("Host email (override)", input({ name: "hostEmail", placeholder: "optional if template supplies it" })),
+    ]),
+    zoomDetails,
+    btn("Create in Zoom now", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" }),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
 
@@ -212,6 +400,9 @@ async function tabEvents(section) {
     try {
       const fd = Object.fromEntries(new FormData(form));
       Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+      if (!templateIdInput.value || zoomDetails.open) {
+        fd.zoomPayload = zoomForm.getPayload();
+      }
       await api("/api/zoom/create", { method: "POST", body: JSON.stringify(fd) });
       banner(msgHost, "Event created in Zoom.", "ok");
       form.reset();
@@ -312,20 +503,157 @@ async function tabSchedule(section) {
 }
 
 /* ================= Registration Routes ================= */
+/* ================= Shared value-mapping UI (GHL fields / Sheets columns / SendBlue vars) ================= */
+const TOKEN_OPTIONS = [
+  { value: "email", label: "Email" },
+  { value: "firstName", label: "First name" },
+  { value: "lastName", label: "Last name" },
+  { value: "phone", label: "Phone" },
+  { value: "webinarTopic", label: "Webinar topic" },
+  { value: "webinarDateEastern", label: "Webinar date (Eastern)" },
+  { value: "webinarDateUtc", label: "Webinar date (UTC)" },
+  { value: "joinUrl", label: "Join link" },
+  { value: "shortJoinUrl", label: "Short join link" },
+  { value: "zoomRegistrantId", label: "Zoom registrant ID" },
+  { value: "routeSlug", label: "Route slug" },
+];
+
+function buildValueSourceControl(initial = {}) {
+  const sourceSelect = select([{ value: "token", label: "Computed value" }, { value: "static", label: "Static text" }], {});
+  sourceSelect.value = initial.source || "token";
+  const tokenSelect = select(TOKEN_OPTIONS, {});
+  if (initial.token) tokenSelect.value = initial.token;
+  const staticInput = input({ placeholder: "Static value", value: initial.staticValue || "" });
+
+  function sync() {
+    tokenSelect.classList.toggle("hidden", sourceSelect.value !== "token");
+    staticInput.classList.toggle("hidden", sourceSelect.value !== "static");
+  }
+  sourceSelect.addEventListener("change", sync);
+  sync();
+
+  return {
+    container: el("div", { class: "flex gap-2 flex-1 min-w-0" }, [sourceSelect, tokenSelect, staticInput]),
+    getValue: () => (sourceSelect.value === "token" ? { source: "token", token: tokenSelect.value } : { source: "static", staticValue: staticInput.value }),
+  };
+}
+
+// leftBuilder(initial) -> {container, getValue()} for the row's left-hand control (a field
+// dropdown, or a free-text header/label input, depending on the integration).
+function buildMappingList(leftBuilder, initialRows = [], addLabel = "Add row") {
+  const rowsHost = el("div", { class: "flex flex-col gap-2" });
+  const rows = [];
+
+  function addRow(initial = {}) {
+    const left = leftBuilder(initial);
+    const valueSource = buildValueSourceControl(initial);
+    const entry = { left, valueSource };
+    const rowWrap = el("div", { class: "flex items-center gap-2" }, [
+      left.container,
+      valueSource.container,
+      iconBtn("trash", { title: "Remove", onClick: () => { rowWrap.remove(); rows.splice(rows.indexOf(entry), 1); } }),
+    ]);
+    rows.push(entry);
+    rowsHost.appendChild(rowWrap);
+  }
+  for (const r of initialRows) addRow(r);
+
+  return {
+    container: el("div", { class: "flex flex-col gap-2" }, [rowsHost, btn(addLabel, { variant: "secondary", icon: "plus", onClick: () => addRow() })]),
+    getRows: () => rows.map((r) => ({ ...r.left.getValue(), ...r.valueSource.getValue() })),
+  };
+}
+
+function tagsInput(placeholder, initial = []) {
+  return input({ placeholder, value: (initial || []).join(", ") });
+}
+function parseTags(inputEl) {
+  return inputEl.value.split(",").map((t) => t.trim()).filter(Boolean);
+}
+
 async function tabRoutes(section) {
-  section.appendChild(pageHeader("Registration Routes", "A stable webhook URL to paste into ClickFunnels, a GHL workflow, or Zapier."));
+  section.appendChild(pageHeader("Registration Routes", "A stable webhook URL to paste into ClickFunnels, a GHL workflow, or Zapier - plus what happens after someone registers."));
 
   const msgHost = el("div", {});
   section.appendChild(msgHost);
 
-  const form = el("form", { class: "grid sm:grid-cols-2 gap-3" }, [
+  const baseFields = el("div", { class: "grid sm:grid-cols-2 gap-3" }, [
     field("Type", select([{ value: "webinar", label: "Webinar" }, { value: "meeting", label: "Meeting" }], { name: "type" })),
     field("Selection mode", select([{ value: "upcoming", label: "Upcoming (by series)" }, { value: "specific", label: "Specific event" }], { name: "selectionMode" })),
     field("Series ID (upcoming mode)", input({ name: "seriesId" })),
     field("Specific Zoom event ID", input({ name: "specificZoomEventId" })),
     field("GHL workflow ID", input({ name: "ghlWorkflowId", required: true })),
     field("GHL location ID (optional override)", input({ name: "ghlLocationId" })),
-    btn("Create route", { type: "submit", icon: "plus", cls: "sm:col-span-2 justify-center sm:w-fit" }),
+  ]);
+
+  // --- GHL tags & dynamic field mapping ---
+  let ghlFieldOptions = [];
+  try {
+    ghlFieldOptions = (await api("/api/ghl/custom-fields")).map((f) => ({ value: f.id, label: f.name }));
+  } catch {
+    /* GHL not configured yet - field mapping dropdown will just be empty until it is */
+  }
+  const ghlTagsEl = tagsInput("e.g. webinar-optin, source-clickfunnels");
+  const ghlFieldsMapper = buildMappingList(
+    (initial) => {
+      const sel = select(ghlFieldOptions.length ? ghlFieldOptions : [{ value: "", label: "No GHL fields found - configure GHL in Settings" }], {});
+      if (initial.fieldId) sel.value = initial.fieldId;
+      return { container: sel, getValue: () => ({ fieldId: sel.value }) };
+    },
+    [],
+    "Add field mapping"
+  );
+  const ghlSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "GHL tags & extra fields" }),
+    el("div", { class: "mt-3 flex flex-col gap-3" }, [field("Tags to apply at registration (comma-separated)", ghlTagsEl), field("Extra field mappings (in addition to the 4 built-in fields)", ghlFieldsMapper.container)]),
+  ]);
+
+  // --- Google Sheets ---
+  const sheetsEnabled = el("input", { type: "checkbox", class: "rounded border-slate-300" });
+  const sheetsIdInput = input({ placeholder: "Spreadsheet ID (from its URL)" });
+  const sheetsNameInput = input({ placeholder: "Sheet/tab name, e.g. Registrants" });
+  const sheetsMapper = buildMappingList((initial) => { const inp = input({ placeholder: "Column header", value: initial.header || "" }); return { container: inp, getValue: () => ({ header: inp.value }) }; }, [], "Add column");
+  const sheetsSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "Google Sheets" }),
+    el("div", { class: "mt-3 flex flex-col gap-3" }, [
+      el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300" }, [sheetsEnabled, el("span", { text: "Add a row to a Google Sheet on registration" })]),
+      el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("Spreadsheet ID", sheetsIdInput), field("Sheet name", sheetsNameInput)]),
+      field("Columns (in order)", sheetsMapper.container),
+      el("p", { class: "text-xs text-slate-400", text: "Share the spreadsheet with your Google service account's email as an Editor (Settings > Credentials)." }),
+    ]),
+  ]);
+
+  // --- SendBlue ---
+  const sendblueEnabled = el("input", { type: "checkbox", class: "rounded border-slate-300" });
+  const sendblueTagsEl = tagsInput("e.g. webinar, hot-lead");
+  const sendblueMapper = buildMappingList((initial) => { const inp = input({ placeholder: "Variable label", value: initial.label || "" }); return { container: inp, getValue: () => ({ label: inp.value }) }; }, [], "Add custom variable");
+  const sendblueSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "SendBlue" }),
+    el("div", { class: "mt-3 flex flex-col gap-3" }, [
+      el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300" }, [sendblueEnabled, el("span", { text: "Add/update the registrant as a SendBlue contact (requires a phone number)" })]),
+      field("Tags (comma-separated)", sendblueTagsEl),
+      field("Custom variables", sendblueMapper.container),
+    ]),
+  ]);
+
+  // --- Hyros ---
+  const hyrosEnabled = el("input", { type: "checkbox", class: "rounded border-slate-300" });
+  const hyrosTagsEl = tagsInput("e.g. webinar-registered");
+  const hyrosSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "Hyros" }),
+    el("div", { class: "mt-3 flex flex-col gap-3" }, [
+      el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300" }, [hyrosEnabled, el("span", { text: "Tag the lead in Hyros on registration" })]),
+      field("Tags (comma-separated)", hyrosTagsEl),
+    ]),
+  ]);
+
+  const form = el("form", { class: "flex flex-col gap-4" }, [
+    baseFields,
+    ghlSection,
+    sheetsSection,
+    sendblueSection,
+    hyrosSection,
+    btn("Create route", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" }),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
 
@@ -347,6 +675,11 @@ async function tabRoutes(section) {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
     Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+    fd.ghlTags = parseTags(ghlTagsEl);
+    fd.ghlOutputFields = ghlFieldsMapper.getRows().filter((r) => r.fieldId);
+    fd.sheetsConfig = { enabled: sheetsEnabled.checked, spreadsheetId: sheetsIdInput.value, sheetName: sheetsNameInput.value, columns: sheetsMapper.getRows().filter((r) => r.header) };
+    fd.sendblueConfig = { enabled: sendblueEnabled.checked, tags: parseTags(sendblueTagsEl), customVariables: sendblueMapper.getRows().filter((r) => r.label) };
+    fd.hyrosConfig = { enabled: hyrosEnabled.checked, tags: parseTags(hyrosTagsEl) };
     try {
       const created = await api("/api/registration-routes", { method: "POST", body: JSON.stringify(fd) });
       banner(msgHost, `Created. Webhook URL: ${created.webhookUrl}`, "ok");
@@ -607,14 +940,12 @@ async function buildCredentialsCard(msgHost, onSaved) {
   const form = el("form", { class: "grid sm:grid-cols-2 gap-4" });
 
   for (const r of rows) {
-    const inputEl = input({
-      name: r.formKey,
-      type: r.secret ? "password" : "text",
-      placeholder: r.secret ? (r.masked ? `Currently ${r.masked} - leave blank to keep` : "Not set") : r.value || "Not set",
-      value: r.secret ? "" : r.value || "",
-    });
+    const placeholder = r.secret ? (r.masked ? `Currently ${r.masked} - leave blank to keep` : "Not set") : r.value || "Not set";
+    const inputEl = r.multiline
+      ? textarea({ name: r.formKey, placeholder })
+      : input({ name: r.formKey, type: r.secret ? "password" : "text", placeholder, value: r.secret ? "" : r.value || "" });
     form.appendChild(
-      el("div", { class: "flex flex-col gap-1.5" }, [
+      el("div", { class: `flex flex-col gap-1.5 ${r.multiline ? "sm:col-span-2" : ""}` }, [
         el("div", { class: "flex items-center justify-between" }, [
           el("span", { class: "text-sm font-medium text-slate-700 dark:text-slate-300", text: r.label }),
           sourceBadge(r.source),

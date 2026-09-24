@@ -7,12 +7,30 @@ import { resolveEvent } from "../lib/events";
 import { addZoomRegistrant } from "../lib/zoom";
 import { createShortLink, shortLinkUrl } from "../lib/shortlinks";
 import { extractContact } from "../lib/extractContact";
-import { ensureCustomFields, enrollInWorkflow, upsertContact } from "../lib/ghl";
+import { addTags, ensureCustomFields, enrollInWorkflow, upsertContact } from "../lib/ghl";
+import { appendRow } from "../lib/googleSheets";
+import { upsertContact as sendblueUpsertContact } from "../lib/sendblue";
+import { tagLead as hyrosTagLead } from "../lib/hyros";
 import { formatEastern } from "../lib/time";
 import { getBaseUrl } from "../lib/baseUrl";
 import { withCredentials } from "../lib/credentials";
+import { renderMapping, resolveTokens, type MappingEntry } from "../lib/tokens";
 
 const app = new Hono<AppEnv>();
+
+type GhlOutputField = MappingEntry & { fieldId: string };
+type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
+type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
+type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
+
+function parseJson<T>(raw: string | null): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
+}
 
 app.post("/:slug", async (c) => {
   const db = getDb(c.env.DB);
@@ -43,6 +61,8 @@ app.post("/:slug", async (c) => {
   const { email, firstName, lastName, phone } = extractContact(body, mapping);
   if (!email) return c.json({ error: "could not find an email address in the request body" }, 400);
 
+  // --- Critical path: Zoom registration + baseline GHL contact/workflow. A failure here fails
+  // the whole request - everything below is best-effort and collected as `warnings` instead. ---
   const effEnv = await withCredentials(db, c.env);
   const zoomRegistrant = await addZoomRegistrant(effEnv, type, event.zoomId, {
     email,
@@ -66,6 +86,21 @@ app.post("/:slug", async (c) => {
   const baseUrl = getBaseUrl(c);
   const shortJoinUrl = shortLinkUrl(baseUrl, shortCode);
 
+  const tokens = resolveTokens({
+    email,
+    firstName,
+    lastName,
+    phone,
+    webinarTopic: event.topic,
+    webinarDateEastern: formatEastern(event.startTimeUtc),
+    webinarDateUtc: event.startTimeUtc.toISOString(),
+    joinUrl: zoomRegistrant.join_url,
+    shortJoinUrl,
+    zoomRegistrantId: String(zoomRegistrant.registrant_id),
+    routeSlug: route.slug,
+  });
+
+  const ghlOutputFields = parseJson<GhlOutputField[]>(route.ghlOutputFieldsJson) ?? [];
   const fieldIds = await ensureCustomFields(db, effEnv, locationId);
   const contact = await upsertContact(effEnv, {
     locationId,
@@ -74,10 +109,11 @@ app.post("/:slug", async (c) => {
     lastName,
     phone,
     customFields: [
-      { id: fieldIds.webinar_date_eastern, value: formatEastern(event.startTimeUtc) },
-      { id: fieldIds.join_link, value: zoomRegistrant.join_url },
-      { id: fieldIds.short_join_link, value: shortJoinUrl },
-      { id: fieldIds.registrant_id, value: String(zoomRegistrant.registrant_id) },
+      { id: fieldIds.webinar_date_eastern, value: tokens.webinarDateEastern },
+      { id: fieldIds.join_link, value: tokens.joinUrl },
+      { id: fieldIds.short_join_link, value: tokens.shortJoinUrl },
+      { id: fieldIds.registrant_id, value: tokens.zoomRegistrantId },
+      ...ghlOutputFields.map((f) => ({ id: f.fieldId, value: renderMapping(f, tokens) })),
     ],
   });
 
@@ -88,6 +124,60 @@ app.post("/:slug", async (c) => {
     .set({ shortJoinCode: shortCode, ghlContactId: contact.id })
     .where(eq(schema.registrants.id, registrantId));
 
+  // --- Best-effort extras: each isolated so one failing never breaks the registration itself. ---
+  const warnings: string[] = [];
+  const asWarning = (label: string, err: unknown) => warnings.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+
+  const ghlTags = parseJson<string[]>(route.ghlTagsJson);
+  if (ghlTags && ghlTags.length > 0) {
+    try {
+      await addTags(effEnv, contact.id, ghlTags);
+    } catch (err) {
+      asWarning("GHL tags", err);
+    }
+  }
+
+  const sheetsConfig = parseJson<SheetsConfig>(route.sheetsConfigJson);
+  if (sheetsConfig?.enabled && sheetsConfig.spreadsheetId && sheetsConfig.sheetName) {
+    try {
+      await appendRow(effEnv, {
+        spreadsheetId: sheetsConfig.spreadsheetId,
+        sheetName: sheetsConfig.sheetName,
+        values: sheetsConfig.columns.map((col) => renderMapping(col, tokens)),
+      });
+    } catch (err) {
+      asWarning("Google Sheets", err);
+    }
+  }
+
+  const sendblueConfig = parseJson<SendblueConfig>(route.sendblueConfigJson);
+  if (sendblueConfig?.enabled) {
+    if (phone) {
+      try {
+        await sendblueUpsertContact(effEnv, {
+          number: phone,
+          firstName: firstName ?? undefined,
+          lastName: lastName ?? undefined,
+          tags: sendblueConfig.tags,
+          customVariables: Object.fromEntries(sendblueConfig.customVariables.map((cv) => [cv.label, renderMapping(cv, tokens)])),
+        });
+      } catch (err) {
+        asWarning("SendBlue", err);
+      }
+    } else {
+      warnings.push("SendBlue: skipped - registrant has no phone number");
+    }
+  }
+
+  const hyrosConfig = parseJson<HyrosConfig>(route.hyrosConfigJson);
+  if (hyrosConfig?.enabled) {
+    try {
+      await hyrosTagLead(effEnv, { email, tags: hyrosConfig.tags, source: hyrosConfig.source });
+    } catch (err) {
+      asWarning("Hyros", err);
+    }
+  }
+
   return c.json(
     {
       registrantId,
@@ -96,6 +186,7 @@ app.post("/:slug", async (c) => {
       joinUrl: zoomRegistrant.join_url,
       shortJoinUrl,
       ghlContactId: contact.id,
+      ...(warnings.length > 0 ? { warnings } : {}),
     },
     201
   );

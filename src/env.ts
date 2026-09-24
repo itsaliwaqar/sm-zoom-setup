@@ -13,6 +13,14 @@ export type Bindings = {
   PUBLIC_BASE_URL?: string;
   GHL_ATTENDED_TAG?: string; // default: "Webinar Attended"
   GHL_NO_SHOW_TAG?: string; // default: "Webinar No-Show"
+
+  // All optional: these integrations are normally configured from Settings > Credentials (stored
+  // in D1, see src/lib/credentials.ts) rather than as deploy secrets, but a deploy secret of the
+  // same name works as a fallback, same pattern as the Zoom/GHL credentials above.
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  SENDBLUE_API_KEY_ID?: string;
+  SENDBLUE_API_SECRET_KEY?: string;
+  HYROS_API_KEY?: string;
 };
 
 export type Variables = {

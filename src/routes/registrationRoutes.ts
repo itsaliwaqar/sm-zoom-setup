@@ -7,9 +7,15 @@ import { generateShortCode } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
 import { requireAuth } from "../lib/auth";
 import { withCredentials } from "../lib/credentials";
+import type { MappingEntry } from "../lib/tokens";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
+
+type GhlOutputField = MappingEntry & { fieldId: string; fieldName?: string };
+type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
+type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
+type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
 
 type CreateBody = {
   type: "webinar" | "meeting";
@@ -19,7 +25,22 @@ type CreateBody = {
   ghlWorkflowId: string;
   ghlLocationId?: string;
   fieldMapping?: Record<string, string>;
+  ghlTags?: string[];
+  ghlOutputFields?: GhlOutputField[];
+  sheetsConfig?: SheetsConfig;
+  sendblueConfig?: SendblueConfig;
+  hyrosConfig?: HyrosConfig;
 };
+
+function integrationColumns(body: Partial<CreateBody>): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  if (body.ghlTags) update.ghlTagsJson = JSON.stringify(body.ghlTags);
+  if (body.ghlOutputFields) update.ghlOutputFieldsJson = JSON.stringify(body.ghlOutputFields);
+  if (body.sheetsConfig) update.sheetsConfigJson = JSON.stringify(body.sheetsConfig);
+  if (body.sendblueConfig) update.sendblueConfigJson = JSON.stringify(body.sendblueConfig);
+  if (body.hyrosConfig) update.hyrosConfigJson = JSON.stringify(body.hyrosConfig);
+  return update;
+}
 
 app.post("/", async (c) => {
   const body = await c.req.json<CreateBody>();
@@ -48,6 +69,7 @@ app.post("/", async (c) => {
     ghlWorkflowId: body.ghlWorkflowId,
     ghlLocationId,
     fieldMappingJson: body.fieldMapping ? JSON.stringify(body.fieldMapping) : null,
+    ...integrationColumns(body),
   });
 
   const created = await db.select().from(schema.registrationRoutes).where(eq(schema.registrationRoutes.id, id)).get();
@@ -71,7 +93,7 @@ app.get("/:id", async (c) => {
 app.patch("/:id", async (c) => {
   const body = await c.req.json<Partial<CreateBody> & { enabled?: boolean }>();
   const db = getDb(c.env.DB);
-  const update: Record<string, unknown> = {};
+  const update: Record<string, unknown> = { ...integrationColumns(body) };
   if (body.type) update.type = body.type;
   if (body.selectionMode) update.selectionMode = body.selectionMode;
   if (body.seriesId !== undefined) update.seriesId = body.seriesId;

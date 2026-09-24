@@ -53,7 +53,7 @@ async function ghlJson<T>(env: Bindings, path: string, init: RequestInit = {}): 
   return text ? JSON.parse(text) : ({} as T);
 }
 
-async function listCustomFields(env: Bindings, locationId: string) {
+export async function listCustomFields(env: Bindings, locationId: string) {
   const data = await ghlJson<{ customFields: { id: string; name: string }[] }>(
     env,
     `/locations/${locationId}/customFields`

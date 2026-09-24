@@ -9,12 +9,16 @@ import { getSetting, setSetting, type SettingKey } from "./settings";
 // bodies and the admin UI's form field names - both the GET/PATCH handlers below and the
 // frontend derive it from here, so the two can never drift out of sync again.
 export const CREDENTIAL_FIELDS = [
-  { key: "zoom_account_id", formKey: "zoomAccountId", envVar: "ZOOM_ACCOUNT_ID", label: "Zoom Account ID", secret: false },
-  { key: "zoom_client_id", formKey: "zoomClientId", envVar: "ZOOM_CLIENT_ID", label: "Zoom Client ID", secret: false },
-  { key: "zoom_client_secret", formKey: "zoomClientSecret", envVar: "ZOOM_CLIENT_SECRET", label: "Zoom Client Secret", secret: true },
-  { key: "ghl_private_token", formKey: "ghlPrivateToken", envVar: "GHL_PRIVATE_TOKEN", label: "GHL Private Integration Token", secret: true },
-  { key: "ghl_default_location_id", formKey: "ghlDefaultLocationId", envVar: "GHL_DEFAULT_LOCATION_ID", label: "GHL Default Location ID", secret: false },
-] as const satisfies readonly { key: SettingKey; formKey: string; envVar: keyof Bindings; label: string; secret: boolean }[];
+  { key: "zoom_account_id", formKey: "zoomAccountId", envVar: "ZOOM_ACCOUNT_ID", label: "Zoom Account ID", secret: false, multiline: false },
+  { key: "zoom_client_id", formKey: "zoomClientId", envVar: "ZOOM_CLIENT_ID", label: "Zoom Client ID", secret: false, multiline: false },
+  { key: "zoom_client_secret", formKey: "zoomClientSecret", envVar: "ZOOM_CLIENT_SECRET", label: "Zoom Client Secret", secret: true, multiline: false },
+  { key: "ghl_private_token", formKey: "ghlPrivateToken", envVar: "GHL_PRIVATE_TOKEN", label: "GHL Private Integration Token", secret: true, multiline: false },
+  { key: "ghl_default_location_id", formKey: "ghlDefaultLocationId", envVar: "GHL_DEFAULT_LOCATION_ID", label: "GHL Default Location ID", secret: false, multiline: false },
+  { key: "google_service_account_json", formKey: "googleServiceAccountJson", envVar: "GOOGLE_SERVICE_ACCOUNT_JSON", label: "Google Service Account JSON", secret: true, multiline: true },
+  { key: "sendblue_api_key_id", formKey: "sendblueApiKeyId", envVar: "SENDBLUE_API_KEY_ID", label: "SendBlue API Key ID", secret: false, multiline: false },
+  { key: "sendblue_api_secret_key", formKey: "sendblueApiSecretKey", envVar: "SENDBLUE_API_SECRET_KEY", label: "SendBlue API Secret Key", secret: true, multiline: false },
+  { key: "hyros_api_key", formKey: "hyrosApiKey", envVar: "HYROS_API_KEY", label: "Hyros API Key", secret: true, multiline: false },
+] as const satisfies readonly { key: SettingKey; formKey: string; envVar: keyof Bindings; label: string; secret: boolean; multiline: boolean }[];
 
 export type CredentialFieldKey = (typeof CREDENTIAL_FIELDS)[number]["key"];
 export type CredentialFormKey = (typeof CREDENTIAL_FIELDS)[number]["formKey"];
@@ -24,6 +28,7 @@ export type CredentialStatus = {
   formKey: CredentialFormKey;
   label: string;
   secret: boolean;
+  multiline: boolean;
   source: "db" | "env" | "unset";
   value: string | null; // full value for non-secret fields; null for secret fields (masked instead)
   masked: string | null; // last 4 chars, only for secret fields that are configured
@@ -41,6 +46,7 @@ export async function getCredentialStatuses(db: Db, env: Bindings): Promise<Cred
       formKey: f.formKey,
       label: f.label,
       secret: f.secret,
+      multiline: f.multiline,
       source,
       value: !f.secret && effective ? effective : null,
       masked: f.secret && effective ? `••••${effective.slice(-4)}` : null,
