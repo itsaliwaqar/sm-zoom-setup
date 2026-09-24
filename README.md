@@ -4,13 +4,16 @@ A Cloudflare Worker that automates the Zoom webinar/meeting workflow:
 
 - Create Zoom webinars/meetings via API (now, or on a recurring/one-off schedule) using full Zoom settings.
 - `GET /api/upcoming` — look up the next (or a specific) webinar/meeting's date & time in UTC/Eastern.
-- `POST /webhooks/register/:slug` — a public webhook you paste into ClickFunnels, a GHL workflow, or Zapier. It registers the contact in Zoom, then upserts a GHL contact with the webinar date/time (Eastern), join link, short join link, and Zoom registrant ID, and enrolls them in a GHL workflow.
+- `POST /webhooks/register/:slug` — a public webhook you paste into ClickFunnels, a GHL workflow, or Zapier. It registers the contact in Zoom, upserts a GHL contact with the webinar date/time (Eastern), join link, short join link, and Zoom registrant ID, and enrolls them in a GHL workflow. Per registration route (configurable from the admin UI, no code needed) it can also: apply GHL tags and any number of extra dynamic GHL field mappings, insert a row into a Google Sheet, upsert a SendBlue contact, and tag a Hyros lead — each independently best-effort, so one failing never blocks the registration itself.
 - Short links (`/s/:code`), including an "evergreen" link per series that automatically repoints to whichever webinar is currently upcoming.
 - Post-event attendance sync: ~30 minutes after each event ends, pulls Zoom's attendee report and tags each contact in GHL as attended or no-show (plus a "Minutes Attended" custom field).
-- A modern admin UI at `/admin/` (login-based, with admin/member user roles, a Settings tab, and in-app API docs) for managing all of the above without hand-writing API calls.
+- A modern admin UI at `/admin/` (login-based, with admin/member user roles, a Settings tab, in-app API docs, and a Scopes tab listing every Zoom/GHL permission needed) for managing all of the above without hand-writing API calls.
 - The Zoom access token is refreshed proactively every 30 minutes (it expires hourly) via a second Cron Trigger.
+- A curated Zoom settings form (video/audio/registration/security/recording/webinar-specific) when creating templates or webinars/meetings, with a raw-JSON "advanced" override for anything not covered.
 
 See `.claude`-generated plan for full architecture background if needed. Below is everything required to set this up from zero.
+
+All credentials (Zoom, GHL, and optionally Google Sheets/SendBlue/Hyros for the extra registration-route integrations) can be entered from **Settings > Credentials** in the admin UI instead of `wrangler secret put` — see that tab for exactly which fields are configured vs. still missing, and the **Scopes** tab for what permissions each one needs.
 
 ## 1. Create the Zoom Server-to-Server OAuth app
 
