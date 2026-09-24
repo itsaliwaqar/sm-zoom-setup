@@ -3,10 +3,10 @@ import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import { createShortLink, repointShortLink, resolveShortLink, shortLinkUrl } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 app.post("/", async (c) => {
   const body = await c.req.json<{ targetUrl: string }>();

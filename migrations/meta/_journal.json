@@ -15,6 +15,13 @@
       "when": 1790019413126,
       "tag": "0001_uneven_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790260716216,
+      "tag": "0002_black_freak",
+      "breakpoints": true
     }
   ]
 }

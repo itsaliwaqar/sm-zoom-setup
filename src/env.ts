@@ -15,4 +15,11 @@ export type Bindings = {
   GHL_NO_SHOW_TAG?: string; // default: "Webinar No-Show"
 };
 
-export type AppEnv = { Bindings: Bindings };
+export type Variables = {
+  // Populated by requireAuth/optionalAuth when the request carries a valid session cookie.
+  // `authType` distinguishes a session login from a raw X-API-Key request (which has no user).
+  session: import("./lib/sessions").SessionData | null;
+  authType: "session" | "apiKey" | null;
+};
+
+export type AppEnv = { Bindings: Bindings; Variables: Variables };

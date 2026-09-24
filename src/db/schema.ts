@@ -115,3 +115,21 @@ export const ghlCustomFields = sqliteTable("ghl_custom_fields", {
 }, (t) => ({
   pk: primaryKey({ columns: [t.locationId, t.fieldKey] }),
 }));
+
+// A person who can log into the admin UI.
+export const users = sqliteTable("users", {
+  id: id(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role", { enum: ["admin", "member"] }).notNull().default("member"),
+  createdAt: createdAt(),
+  lastLoginAt: integer("last_login_at", { mode: "timestamp" }),
+});
+
+// Small key/value store for the handful of settings that are worth editing without a redeploy
+// (currently just the GHL attendance tag names). Deliberately not a general config store.
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+});

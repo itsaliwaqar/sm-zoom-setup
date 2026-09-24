@@ -23,14 +23,27 @@ async function fetchNewAccessToken(env: Bindings): Promise<ZoomTokenResponse> {
   return res.json();
 }
 
+async function storeToken(env: Bindings, token: ZoomTokenResponse): Promise<void> {
+  // Cache slightly under the real expiry (usually 3600s) to avoid ever using a stale token.
+  await env.CACHE_KV.put(TOKEN_CACHE_KEY, token.access_token, { expirationTtl: Math.max(60, token.expires_in - 120) });
+}
+
 export async function getAccessToken(env: Bindings): Promise<string> {
   const cached = await env.CACHE_KV.get(TOKEN_CACHE_KEY);
   if (cached) return cached;
 
   const token = await fetchNewAccessToken(env);
-  // Cache slightly under the real expiry (usually 3600s) to avoid using a stale token.
-  await env.CACHE_KV.put(TOKEN_CACHE_KEY, token.access_token, { expirationTtl: Math.max(60, token.expires_in - 120) });
+  await storeToken(env, token);
   return token.access_token;
+}
+
+// Unconditionally fetches a fresh token and overwrites the cache, regardless of whether the
+// cached one is still valid. Called proactively every 30 min (the token expires hourly) so
+// getAccessToken() almost never has to make a blocking cold-start call. `getAccessToken`'s lazy
+// path stays in place as a fallback in case this ever fails to run.
+export async function refreshAccessToken(env: Bindings): Promise<void> {
+  const token = await fetchNewAccessToken(env);
+  await storeToken(env, token);
 }
 
 async function zoomFetch(env: Bindings, path: string, init: RequestInit = {}): Promise<Response> {

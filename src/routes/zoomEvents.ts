@@ -4,12 +4,12 @@ import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import { processEventAttendance } from "../lib/attendance";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 import { shortLinkUrl } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 app.get("/", async (c) => {
   const db = getDb(c.env.DB);

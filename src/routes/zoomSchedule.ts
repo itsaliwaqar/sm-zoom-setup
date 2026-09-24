@@ -4,10 +4,10 @@ import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import { nextRecurrence, type RecurrenceRule } from "../lib/time";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

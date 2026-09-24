@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { Bindings } from "../env";
+import type { Db } from "../db/client";
 import * as schema from "../db/schema";
+import { getSetting } from "./settings";
 
 const GHL_API_BASE = "https://services.leadconnectorhq.com";
 const GHL_API_VERSION = "2021-07-28";
@@ -22,13 +23,13 @@ export const GHL_FIELD_DEFINITIONS: Record<GhlCustomFieldKey, { name: string; da
   attended_minutes: { name: "Minutes Attended", dataType: "NUMBER" },
 };
 
-// Applied to a contact after the event, based on whether they showed up. Override via
-// GHL_ATTENDED_TAG / GHL_NO_SHOW_TAG env vars.
-export function attendedTag(env: Bindings): string {
-  return env.GHL_ATTENDED_TAG || "Webinar Attended";
+// Applied to a contact after the event, based on whether they showed up. Editable live from the
+// Settings tab (stored in the `settings` table); falls back to the env var, then a hardcoded default.
+export async function attendedTag(db: Db, env: Bindings): Promise<string> {
+  return (await getSetting(db, "ghl_attended_tag")) || env.GHL_ATTENDED_TAG || "Webinar Attended";
 }
-export function noShowTag(env: Bindings): string {
-  return env.GHL_NO_SHOW_TAG || "Webinar No-Show";
+export async function noShowTag(db: Db, env: Bindings): Promise<string> {
+  return (await getSetting(db, "ghl_no_show_tag")) || env.GHL_NO_SHOW_TAG || "Webinar No-Show";
 }
 
 async function ghlFetch(env: Bindings, path: string, init: RequestInit = {}): Promise<Response> {
@@ -70,7 +71,7 @@ async function createCustomField(env: Bindings, locationId: string, name: string
 
 // Returns { webinar_date_eastern: "<ghl field id>", ... }, creating any missing fields in GHL first.
 export async function ensureCustomFields(
-  db: DrizzleD1Database<typeof schema>,
+  db: Db,
   env: Bindings,
   locationId: string
 ): Promise<Record<GhlCustomFieldKey, string>> {

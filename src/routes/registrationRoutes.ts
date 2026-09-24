@@ -5,10 +5,10 @@ import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import { generateShortCode } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 type CreateBody = {
   type: "webinar" | "meeting";

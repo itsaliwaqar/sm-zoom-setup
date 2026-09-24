@@ -8,9 +8,10 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./public"
 binding = "ASSETS"
 
-# Runs the due-job processor for scheduled webinar/meeting creation.
+# Two schedules: every 15 min runs due-job creation + attendance sync; every 30 min proactively
+# refreshes the Zoom access token (it expires hourly) - see scheduled() in src/index.ts.
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "*/30 * * * *"]
 
 [[d1_databases]]
 binding = "DB"

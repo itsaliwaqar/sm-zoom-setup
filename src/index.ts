@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import type { AppEnv, Bindings } from "./env";
 import { processDueJobs, processAttendanceSync } from "./scheduled";
+import { refreshAccessToken } from "./lib/zoom";
 
+import auth from "./routes/auth";
+import users from "./routes/users";
+import settings from "./routes/settings";
 import series from "./routes/series";
 import templates from "./routes/templates";
 import zoomCreate from "./routes/zoomCreate";
@@ -17,9 +21,15 @@ const app = new Hono<AppEnv>();
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-// Admin API - each of these routers guards itself with X-API-Key (see requireAdminKey in each file).
-// They are mounted at distinct sub-paths so their internal "*" middleware can never match a sibling
-// route (e.g. /api/upcoming, which is intentionally public) - see note in that route's file.
+// Public: login/setup/session endpoints for the admin UI.
+app.route("/auth", auth);
+
+// Admin API - each of these routers guards itself (see requireAuth/requireAdminRole in each
+// file: a logged-in session OR the shared X-API-Key both work, except user management which is
+// session-only). Mounted at distinct sub-paths so their internal "*" middleware can never match a
+// sibling route (e.g. /api/upcoming, which is intentionally public).
+app.route("/api/users", users);
+app.route("/api/settings", settings);
 app.route("/api/series", series);
 app.route("/api/templates", templates);
 app.route("/api/zoom/create", zoomCreate);
@@ -39,7 +49,11 @@ app.route("/s", shortLinkRedirect);
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
+    if (event.cron === "*/30 * * * *") {
+      ctx.waitUntil(refreshAccessToken(env));
+      return;
+    }
     ctx.waitUntil(processDueJobs(env));
     ctx.waitUntil(processAttendanceSync(env));
   },

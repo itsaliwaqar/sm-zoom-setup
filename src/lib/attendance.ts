@@ -30,6 +30,8 @@ export async function processEventAttendance(db: Db, env: Bindings, event: Event
     .where(eq(schema.registrants.zoomEventId, event.id))
     .all();
 
+  const [attendedTagName, noShowTagName] = await Promise.all([attendedTag(db, env), noShowTag(db, env)]);
+
   for (const registrant of eventRegistrants) {
     const seconds = durationsByEmail.get(registrant.email.toLowerCase()) ?? 0;
     const attended = seconds > 0;
@@ -55,7 +57,7 @@ export async function processEventAttendance(db: Db, env: Bindings, event: Event
       email: registrant.email,
       customFields: [{ id: fieldIds.attended_minutes, value: String(attendedMinutes) }],
     });
-    await addTags(env, registrant.ghlContactId, [attended ? attendedTag(env) : noShowTag(env)]);
+    await addTags(env, registrant.ghlContactId, [attended ? attendedTagName : noShowTagName]);
   }
 
   await db

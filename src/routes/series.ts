@@ -3,10 +3,10 @@ import { eq } from "drizzle-orm";
 import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 app.post("/", async (c) => {
   const body = await c.req.json<{ slug: string; name: string; type: "webinar" | "meeting" }>();

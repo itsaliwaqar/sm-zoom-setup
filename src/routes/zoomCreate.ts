@@ -7,10 +7,10 @@ import type { ZoomCreatePayload, ZoomEventType } from "../lib/zoom";
 import { createAndStoreZoomEvent } from "../lib/eventCreation";
 import { shortLinkUrl } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
-import { requireAdminKey } from "../lib/auth";
+import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
-app.use("*", requireAdminKey);
+app.use("*", requireAuth);
 
 type CreateBody = {
   type: ZoomEventType;
