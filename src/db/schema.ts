@@ -32,9 +32,10 @@ export const scheduledJobs = sqliteTable("scheduled_jobs", {
   mode: text("mode", { enum: ["recurring", "once"] }).notNull(),
   seriesId: text("series_id").notNull().references(() => series.id),
   templateId: text("template_id").notNull().references(() => templates.id),
-  recurrenceRuleJson: text("recurrence_rule_json"), // {dayOfWeek, time, tz} for recurring
-  leadTimeDays: integer("lead_time_days").notNull().default(0),
-  runAtUtc: integer("run_at_utc", { mode: "timestamp" }).notNull(), // next time processDueJobs should fire this
+  recurrenceRuleJson: text("recurrence_rule_json"), // {daysOfWeek: number[], time, tz} for recurring
+  leadTimeDays: integer("lead_time_days").notNull().default(0), // deprecated, unused - kept so the migration only adds columns, never drops
+  horizonDays: integer("horizon_days").notNull().default(0), // recurring: how many days ahead to always keep created
+  runAtUtc: integer("run_at_utc", { mode: "timestamp" }).notNull(), // once: when to fire. recurring: last-reconciled marker, not a gate
   status: text("status", { enum: ["pending", "completed", "failed"] }).notNull().default("pending"),
   retryCount: integer("retry_count").notNull().default(0),
   lastError: text("last_error"),
@@ -69,13 +70,15 @@ export const registrationRoutes = sqliteTable("registration_routes", {
   selectionMode: text("selection_mode", { enum: ["upcoming", "specific"] }).notNull(),
   seriesId: text("series_id").references(() => series.id),
   specificZoomEventId: text("specific_zoom_event_id").references(() => zoomEvents.id),
-  ghlWorkflowId: text("ghl_workflow_id").notNull(),
-  ghlLocationId: text("ghl_location_id").notNull(),
+  ghlEnabled: integer("ghl_enabled", { mode: "boolean" }).notNull().default(true),
+  ghlWorkflowId: text("ghl_workflow_id").notNull(), // "" when ghlEnabled is false - app always provides a value
+  ghlLocationId: text("ghl_location_id").notNull(), // "" when ghlEnabled is false - app always provides a value
   fieldMappingJson: text("field_mapping_json"), // {email:"email", firstName:"first_name", ...} - INCOMING payload -> contact fields
   ghlTagsJson: text("ghl_tags_json"), // string[] - applied to the GHL contact at registration time
   ghlOutputFieldsJson: text("ghl_output_fields_json"), // [{fieldId, fieldName, source, token?, staticValue?}] - additive to the 5 fixed fields
   sheetsConfigJson: text("sheets_config_json"), // {enabled, spreadsheetId, sheetName, columns: [{header, source, token?, staticValue?}]}
   sendblueConfigJson: text("sendblue_config_json"), // {enabled, tags, customVariables: [{label, source, token?, staticValue?}]}
+  outboundWebhookConfigJson: text("outbound_webhook_config_json"), // {enabled, url}
   hyrosConfigJson: text("hyros_config_json"), // {enabled, tags, source?}
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   createdAt: createdAt(),

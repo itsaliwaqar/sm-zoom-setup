@@ -3,21 +3,19 @@ import { eq } from "drizzle-orm";
 import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
-import { nextRecurrence, type RecurrenceRule } from "../lib/time";
+import type { RecurrenceRule } from "../lib/time";
 import { requireAuth } from "../lib/auth";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 type ScheduleBody =
   | {
       mode: "recurring";
       seriesId: string;
       templateId: string;
-      recurrenceRule: RecurrenceRule;
-      leadTimeDays?: number;
+      recurrenceRule: RecurrenceRule; // { daysOfWeek: number[], time, tz }
+      horizonDays?: number; // how many days ahead to always keep created - default 14 (2 weeks)
     }
   | {
       mode: "once";
@@ -44,12 +42,10 @@ app.post("/", async (c) => {
   const id = crypto.randomUUID();
 
   if (body.mode === "recurring") {
-    if (!body.recurrenceRule) return c.json({ error: "recurrenceRule is required for mode=recurring" }, 400);
-    const leadTimeDays = body.leadTimeDays ?? 0;
-    const nextEventStart = nextRecurrence(body.recurrenceRule, new Date());
-    let runAtUtc = new Date(nextEventStart.getTime() - leadTimeDays * DAY_MS);
-    // If the lead-time window for the very next occurrence has already passed, create it ASAP.
-    if (runAtUtc.getTime() <= Date.now()) runAtUtc = new Date();
+    if (!body.recurrenceRule?.daysOfWeek?.length) {
+      return c.json({ error: "recurrenceRule.daysOfWeek (at least one day) is required for mode=recurring" }, 400);
+    }
+    const horizonDays = body.horizonDays ?? 14;
 
     await db.insert(schema.scheduledJobs).values({
       id,
@@ -57,8 +53,8 @@ app.post("/", async (c) => {
       seriesId: body.seriesId,
       templateId: body.templateId,
       recurrenceRuleJson: JSON.stringify(body.recurrenceRule),
-      leadTimeDays,
-      runAtUtc,
+      horizonDays,
+      runAtUtc: new Date(), // due immediately - the next cron tick reconciles the whole window
     });
   } else {
     if (!body.eventStartTime) return c.json({ error: "eventStartTime is required for mode=once" }, 400);
@@ -70,7 +66,7 @@ app.post("/", async (c) => {
       seriesId: body.seriesId,
       templateId: body.templateId,
       recurrenceRuleJson: JSON.stringify({ eventStartTimeUtc: body.eventStartTime }),
-      leadTimeDays: 0,
+      horizonDays: 0,
       runAtUtc,
     });
   }

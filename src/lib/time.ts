@@ -3,8 +3,8 @@ export const EASTERN_TZ = "America/New_York";
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export type RecurrenceRule = {
-  dayOfWeek: number; // 0=Sunday .. 6=Saturday
-  time: string; // "HH:MM", 24h, interpreted in `tz`
+  daysOfWeek: number[]; // 0=Sunday .. 6=Saturday, e.g. [0, 3] for Sunday + Wednesday
+  time: string; // "HH:MM", 24h, interpreted in `tz` - shared by every day in daysOfWeek
   tz: string; // IANA timezone, e.g. "America/New_York"
 };
 
@@ -37,17 +37,25 @@ export function zonedTimeToUtc(y: number, m: number, d: number, hh: number, mm: 
   return new Date(asUTC.getTime() + offset);
 }
 
-// Finds the next UTC instant matching a weekly recurrence rule, strictly after `after`.
-export function nextRecurrence(rule: RecurrenceRule, after: Date): Date {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Every UTC instant matching the rule (one or more days of week, at a shared time) that falls
+// strictly after `from` and within `from + horizonDays`. Used to maintain a rolling window of
+// always-scheduled occurrences - e.g. daysOfWeek [0,3] ("Sun, Wed") with horizonDays 14 returns
+// every upcoming Sunday/Wednesday occurrence in the next two weeks.
+export function generateOccurrences(rule: RecurrenceRule, from: Date, horizonDays: number): Date[] {
   const [hh, mm] = rule.time.split(":").map(Number);
-  for (let i = 0; i <= 7; i++) {
-    const probe = new Date(after.getTime() + i * 24 * 3600 * 1000);
+  const cutoff = from.getTime() + horizonDays * DAY_MS;
+  const occurrences: Date[] = [];
+
+  for (let i = 0; i <= horizonDays; i++) {
+    const probe = new Date(from.getTime() + i * DAY_MS);
     const { y, m, d, weekday } = formatInTz(probe, rule.tz);
-    if (weekday !== rule.dayOfWeek) continue;
+    if (!rule.daysOfWeek.includes(weekday)) continue;
     const candidate = zonedTimeToUtc(y, m, d, hh, mm, rule.tz);
-    if (candidate.getTime() > after.getTime()) return candidate;
+    if (candidate.getTime() > from.getTime() && candidate.getTime() <= cutoff) occurrences.push(candidate);
   }
-  throw new Error(`could not compute next recurrence for rule ${JSON.stringify(rule)}`);
+  return occurrences.sort((a, b) => a.getTime() - b.getTime());
 }
 
 // Human-readable Eastern time string for the GHL contact field, e.g.

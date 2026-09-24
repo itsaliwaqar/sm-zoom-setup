@@ -416,18 +416,28 @@ async function tabEvents(section) {
 }
 
 /* ================= Scheduled Jobs ================= */
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 async function tabSchedule(section) {
-  section.appendChild(pageHeader("Scheduled Jobs", "Recurring auto-creation, or a one-off future create - processed every 15 minutes."));
+  section.appendChild(pageHeader("Scheduled Jobs", "Recurring auto-creation keeps a rolling window of upcoming meetings always on the books; one-off schedules a single future create. Checked every 15 minutes."));
 
   const msgHost = el("div", {});
   section.appendChild(msgHost);
 
   const modeSelect = select([{ value: "recurring", label: "Recurring" }, { value: "once", label: "One-off" }], { name: "mode" });
-  const recurringFields = el("div", { class: "grid sm:grid-cols-4 gap-3 sm:col-span-2" }, [
-    field("Day of week (0=Sun)", input({ name: "dayOfWeek", type: "number", min: 0, max: 6, value: 2 })),
-    field("Time (HH:MM)", input({ name: "time", value: "19:00" })),
-    field("Timezone", input({ name: "tz", value: "America/New_York" })),
-    field("Lead time (days)", input({ name: "leadTimeDays", type: "number", value: 7 })),
+
+  const dayCheckboxes = DAY_LABELS.map((label, idx) => {
+    const cb = el("input", { type: "checkbox", class: "rounded border-slate-300 dark:border-slate-600" });
+    return { idx, cb, wrap: el("label", { class: "flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300" }, [cb, el("span", { text: label })]) };
+  });
+
+  const recurringFields = el("div", { class: "flex flex-col gap-3 sm:col-span-2" }, [
+    field("Days of week", el("div", { class: "flex flex-wrap gap-4" }, dayCheckboxes.map((d) => d.wrap))),
+    el("div", { class: "grid sm:grid-cols-3 gap-3" }, [
+      field("Time (HH:MM)", input({ name: "time", value: "14:00" })),
+      field("Timezone", input({ name: "tz", value: "America/New_York" })),
+      field("Weeks of meetings to keep scheduled", input({ name: "horizonWeeks", type: "number", min: 1, value: 2 })),
+    ]),
   ]);
   const onceFields = el("div", { class: "grid sm:grid-cols-2 gap-3 sm:col-span-2 hidden" }, [
     field("Event start time (UTC ISO)", input({ name: "eventStartTime", placeholder: "2026-02-03T19:00:00Z" })),
@@ -452,15 +462,26 @@ async function tabSchedule(section) {
   const tableHost = el("div", {});
   section.appendChild(card([tableHost]));
 
+  function describeSchedule(r) {
+    if (r.mode === "once") {
+      const parsed = JSON.parse(r.recurrenceRuleJson || "{}");
+      return parsed.eventStartTimeUtc ? new Date(parsed.eventStartTimeUtc).toUTCString() : "-";
+    }
+    const parsed = JSON.parse(r.recurrenceRuleJson || "{}");
+    const days = (parsed.daysOfWeek || []).map((d) => DAY_LABELS[d]).join("/");
+    return `${days || "?"} at ${parsed.time || "?"} ${parsed.tz || ""} - keep ${r.horizonDays ?? 0}d ahead`;
+  }
+
   async function load() {
     const rows = await api("/api/zoom/schedule");
     tableHost.innerHTML = "";
     tableHost.appendChild(
       table(
-        ["Mode", "Status", "Next run (UTC)", "Series", "Error", ""],
+        ["Mode", "Status", "Schedule", "Last reconciled / Run at (UTC)", "Series", "Error", ""],
         rows.map((r) => [
           td(r.mode),
           td(badge(r.status, r.status === "pending" ? "amber" : r.status === "completed" ? "green" : "red")),
+          td(el("span", { class: "text-xs", text: describeSchedule(r) })),
           td(new Date(r.runAtUtc).toUTCString()),
           td(codeValue(r.seriesId)),
           td(r.lastError ? el("span", { class: "text-red-600 dark:text-red-400 text-xs", text: r.lastError }) : "-"),
@@ -481,16 +502,18 @@ async function tabSchedule(section) {
   modeSelect.dispatchEvent(new Event("change"));
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const fd = Object.fromEntries(new FormData(form));
-    const body = { mode: fd.mode, seriesId: fd.seriesId, templateId: fd.templateId };
-    if (fd.mode === "recurring") {
-      body.recurrenceRule = { dayOfWeek: Number(fd.dayOfWeek), time: fd.time, tz: fd.tz };
-      body.leadTimeDays = Number(fd.leadTimeDays || 0);
-    } else {
-      body.eventStartTime = fd.eventStartTime;
-      if (fd.createAt) body.createAt = fd.createAt;
-    }
     try {
+      const fd = Object.fromEntries(new FormData(form));
+      const body = { mode: fd.mode, seriesId: fd.seriesId, templateId: fd.templateId };
+      if (fd.mode === "recurring") {
+        const daysOfWeek = dayCheckboxes.filter((d) => d.cb.checked).map((d) => d.idx);
+        if (daysOfWeek.length === 0) throw new Error("Pick at least one day of week");
+        body.recurrenceRule = { daysOfWeek, time: fd.time, tz: fd.tz };
+        body.horizonDays = Number(fd.horizonWeeks || 2) * 7;
+      } else {
+        body.eventStartTime = fd.eventStartTime;
+        if (fd.createAt) body.createAt = fd.createAt;
+      }
       await api("/api/zoom/schedule", { method: "POST", body: JSON.stringify(body) });
       banner(msgHost, "Job scheduled.", "ok");
       load();
@@ -582,17 +605,19 @@ async function tabRoutes(section) {
     field("Selection mode", select([{ value: "upcoming", label: "Upcoming (by series)" }, { value: "specific", label: "Specific event" }], { name: "selectionMode" })),
     field("Series ID (upcoming mode)", input({ name: "seriesId" })),
     field("Specific Zoom event ID", input({ name: "specificZoomEventId" })),
-    field("GHL workflow ID", input({ name: "ghlWorkflowId", required: true })),
-    field("GHL location ID (optional override)", input({ name: "ghlLocationId" })),
   ]);
 
-  // --- GHL tags & dynamic field mapping ---
+  // --- GHL: optional, with tags & dynamic field mapping ---
   let ghlFieldOptions = [];
   try {
     ghlFieldOptions = (await api("/api/ghl/custom-fields")).map((f) => ({ value: f.id, label: f.name }));
   } catch {
     /* GHL not configured yet - field mapping dropdown will just be empty until it is */
   }
+  const ghlEnabledCheckbox = el("input", { type: "checkbox", class: "rounded border-slate-300 dark:border-slate-600" });
+  ghlEnabledCheckbox.checked = true;
+  const ghlWorkflowIdInput = input({ required: true });
+  const ghlLocationIdInput = input({ placeholder: "optional override" });
   const ghlTagsEl = tagsInput("e.g. webinar-optin, source-clickfunnels");
   const ghlFieldsMapper = buildMappingList(
     (initial) => {
@@ -603,10 +628,24 @@ async function tabRoutes(section) {
     [],
     "Add field mapping"
   );
-  const ghlSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
-    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "GHL tags & extra fields" }),
-    el("div", { class: "mt-3 flex flex-col gap-3" }, [field("Tags to apply at registration (comma-separated)", ghlTagsEl), field("Extra field mappings (in addition to the 4 built-in fields)", ghlFieldsMapper.container)]),
+  const ghlDetailFields = el("div", { class: "mt-3 flex flex-col gap-3" }, [
+    el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("GHL workflow ID", ghlWorkflowIdInput), field("GHL location ID", ghlLocationIdInput)]),
+    field("Tags to apply at registration (comma-separated)", ghlTagsEl),
+    field("Extra field mappings (in addition to the 4 built-in fields)", ghlFieldsMapper.container),
   ]);
+  function syncGhlEnabled() {
+    const on = ghlEnabledCheckbox.checked;
+    ghlWorkflowIdInput.required = on;
+    ghlDetailFields.classList.toggle("opacity-40", !on);
+    ghlDetailFields.classList.toggle("pointer-events-none", !on);
+  }
+  ghlEnabledCheckbox.addEventListener("change", syncGhlEnabled);
+  const ghlSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4", open: true }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "GHL sync" }),
+    el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 mt-3" }, [ghlEnabledCheckbox, el("span", { text: "Sync registrants into GHL (contact, workflow, tags, fields)" })]),
+    ghlDetailFields,
+  ]);
+  syncGhlEnabled();
 
   // --- Google Sheets ---
   const sheetsEnabled = el("input", { type: "checkbox", class: "rounded border-slate-300" });
@@ -647,12 +686,24 @@ async function tabRoutes(section) {
     ]),
   ]);
 
+  // --- Forward to another webhook ---
+  const outboundEnabled = el("input", { type: "checkbox", class: "rounded border-slate-300" });
+  const outboundUrlInput = input({ placeholder: "https://..." });
+  const outboundSection = el("details", { class: "rounded-lg border border-slate-200 dark:border-slate-800 p-4" }, [
+    el("summary", { class: "text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer", text: "Forward to another webhook" }),
+    el("div", { class: "mt-3 flex flex-col gap-3" }, [
+      el("label", { class: "flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300" }, [outboundEnabled, el("span", { text: "Send the original request payload, plus Zoom data (join link, etc.), to another URL" })]),
+      field("Target URL", outboundUrlInput),
+    ]),
+  ]);
+
   const form = el("form", { class: "flex flex-col gap-4" }, [
     baseFields,
     ghlSection,
     sheetsSection,
     sendblueSection,
     hyrosSection,
+    outboundSection,
     btn("Create route", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" }),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
@@ -665,8 +716,14 @@ async function tabRoutes(section) {
     tableHost.innerHTML = "";
     tableHost.appendChild(
       table(
-        ["Type", "Mode", "Enabled", "Webhook URL"],
-        rows.map((r) => [td(badge(r.type, r.type === "webinar" ? "indigo" : "slate")), td(r.selectionMode), td(badge(r.enabled ? "yes" : "no", r.enabled ? "green" : "red")), td(el("div", { class: "flex items-center gap-1" }, [codeValue(r.webhookUrl), copyButton(r.webhookUrl)]))]
+        ["Type", "Mode", "GHL", "Enabled", "Webhook URL"],
+        rows.map((r) => [
+          td(badge(r.type, r.type === "webinar" ? "indigo" : "slate")),
+          td(r.selectionMode),
+          td(badge(r.ghlEnabled ? "on" : "off", r.ghlEnabled ? "green" : "slate")),
+          td(badge(r.enabled ? "yes" : "no", r.enabled ? "green" : "red")),
+          td(el("div", { class: "flex items-center gap-1" }, [codeValue(r.webhookUrl), copyButton(r.webhookUrl)])),
+        ]
       )
     ));
   }
@@ -675,15 +732,21 @@ async function tabRoutes(section) {
     e.preventDefault();
     const fd = Object.fromEntries(new FormData(form));
     Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+    fd.ghlEnabled = ghlEnabledCheckbox.checked;
+    fd.ghlWorkflowId = ghlWorkflowIdInput.value;
+    fd.ghlLocationId = ghlLocationIdInput.value || undefined;
     fd.ghlTags = parseTags(ghlTagsEl);
     fd.ghlOutputFields = ghlFieldsMapper.getRows().filter((r) => r.fieldId);
     fd.sheetsConfig = { enabled: sheetsEnabled.checked, spreadsheetId: sheetsIdInput.value, sheetName: sheetsNameInput.value, columns: sheetsMapper.getRows().filter((r) => r.header) };
     fd.sendblueConfig = { enabled: sendblueEnabled.checked, tags: parseTags(sendblueTagsEl), customVariables: sendblueMapper.getRows().filter((r) => r.label) };
     fd.hyrosConfig = { enabled: hyrosEnabled.checked, tags: parseTags(hyrosTagsEl) };
+    fd.outboundWebhookConfig = { enabled: outboundEnabled.checked, url: outboundUrlInput.value };
     try {
       const created = await api("/api/registration-routes", { method: "POST", body: JSON.stringify(fd) });
       banner(msgHost, `Created. Webhook URL: ${created.webhookUrl}`, "ok");
       form.reset();
+      ghlEnabledCheckbox.checked = true;
+      syncGhlEnabled();
       load();
     } catch (err) {
       banner(msgHost, err.message, "err");
@@ -798,7 +861,7 @@ const API_ENDPOINTS = [
     group: "Zoom Events",
     items: [
       { method: "POST", path: "/api/zoom/create", auth: "session-or-key", desc: "Create a webinar/meeting in Zoom right now.", body: { type: "webinar", seriesId: "...", templateId: "...", startTime: "2026-01-14T19:00:00Z" } },
-      { method: "POST", path: "/api/zoom/schedule", auth: "session-or-key", desc: "Schedule recurring or one-off creation.", body: { mode: "recurring", seriesId: "...", templateId: "...", recurrenceRule: { dayOfWeek: 2, time: "19:00", tz: "America/New_York" }, leadTimeDays: 7 } },
+      { method: "POST", path: "/api/zoom/schedule", auth: "session-or-key", desc: "Schedule recurring (rolling window) or one-off creation.", body: { mode: "recurring", seriesId: "...", templateId: "...", recurrenceRule: { daysOfWeek: [0, 3], time: "14:00", tz: "America/New_York" }, horizonDays: 14 } },
       { method: "GET", path: "/api/zoom/schedule", auth: "session-or-key", desc: "List scheduled jobs." },
       { method: "DELETE", path: "/api/zoom/schedule/:id", auth: "session-or-key", desc: "Cancel a scheduled job." },
       { method: "GET", path: "/api/zoom-events", auth: "session-or-key", desc: "List all created Zoom events." },
@@ -810,7 +873,7 @@ const API_ENDPOINTS = [
   {
     group: "Registration",
     items: [
-      { method: "POST", path: "/api/registration-routes", auth: "session-or-key", desc: "Create a saved webhook config.", body: { type: "webinar", selectionMode: "upcoming", seriesId: "...", ghlWorkflowId: "..." } },
+      { method: "POST", path: "/api/registration-routes", auth: "session-or-key", desc: "Create a saved webhook config. GHL is optional (ghlEnabled defaults to true); Sheets/SendBlue/Hyros/outbound-webhook forwarding are all optional too.", body: { type: "webinar", selectionMode: "upcoming", seriesId: "...", ghlEnabled: true, ghlWorkflowId: "...", outboundWebhookConfig: { enabled: true, url: "https://..." } } },
       { method: "GET", path: "/api/registration-routes", auth: "session-or-key", desc: "List registration routes." },
       { method: "POST", path: "/webhooks/register/:slug", auth: "public", desc: "Register a contact into the upcoming/specific event, sync to GHL, and enroll in the workflow.", body: { email: "jane@example.com", firstName: "Jane", lastName: "Doe" } },
     ],

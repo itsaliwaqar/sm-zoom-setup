@@ -11,6 +11,7 @@ import { addTags, ensureCustomFields, enrollInWorkflow, upsertContact } from "..
 import { appendRow } from "../lib/googleSheets";
 import { upsertContact as sendblueUpsertContact } from "../lib/sendblue";
 import { tagLead as hyrosTagLead } from "../lib/hyros";
+import { forward as forwardWebhook } from "../lib/outboundWebhook";
 import { formatEastern } from "../lib/time";
 import { getBaseUrl } from "../lib/baseUrl";
 import { withCredentials } from "../lib/credentials";
@@ -22,6 +23,7 @@ type GhlOutputField = MappingEntry & { fieldId: string };
 type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
 type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
 type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
+type OutboundWebhookConfig = { enabled: boolean; url?: string };
 
 function parseJson<T>(raw: string | null): T | undefined {
   if (!raw) return undefined;
@@ -100,28 +102,33 @@ app.post("/:slug", async (c) => {
     routeSlug: route.slug,
   });
 
-  const ghlOutputFields = parseJson<GhlOutputField[]>(route.ghlOutputFieldsJson) ?? [];
-  const fieldIds = await ensureCustomFields(db, effEnv, locationId);
-  const contact = await upsertContact(effEnv, {
-    locationId,
-    email,
-    firstName,
-    lastName,
-    phone,
-    customFields: [
-      { id: fieldIds.webinar_date_eastern, value: tokens.webinarDateEastern },
-      { id: fieldIds.join_link, value: tokens.joinUrl },
-      { id: fieldIds.short_join_link, value: tokens.shortJoinUrl },
-      { id: fieldIds.registrant_id, value: tokens.zoomRegistrantId },
-      ...ghlOutputFields.map((f) => ({ id: f.fieldId, value: renderMapping(f, tokens) })),
-    ],
-  });
-
-  await enrollInWorkflow(effEnv, contact.id, workflowId);
+  // GHL sync is optional per route (registrationRoutes.ghlEnabled). When enabled it stays part of
+  // the critical path (same as before) - a failure here still fails the whole request.
+  let ghlContactId: string | undefined;
+  if (route.ghlEnabled && route.ghlWorkflowId && locationId) {
+    const ghlOutputFields = parseJson<GhlOutputField[]>(route.ghlOutputFieldsJson) ?? [];
+    const fieldIds = await ensureCustomFields(db, effEnv, locationId);
+    const contact = await upsertContact(effEnv, {
+      locationId,
+      email,
+      firstName,
+      lastName,
+      phone,
+      customFields: [
+        { id: fieldIds.webinar_date_eastern, value: tokens.webinarDateEastern },
+        { id: fieldIds.join_link, value: tokens.joinUrl },
+        { id: fieldIds.short_join_link, value: tokens.shortJoinUrl },
+        { id: fieldIds.registrant_id, value: tokens.zoomRegistrantId },
+        ...ghlOutputFields.map((f) => ({ id: f.fieldId, value: renderMapping(f, tokens) })),
+      ],
+    });
+    await enrollInWorkflow(effEnv, contact.id, workflowId || route.ghlWorkflowId);
+    ghlContactId = contact.id;
+  }
 
   await db
     .update(schema.registrants)
-    .set({ shortJoinCode: shortCode, ghlContactId: contact.id })
+    .set({ shortJoinCode: shortCode, ghlContactId: ghlContactId ?? null })
     .where(eq(schema.registrants.id, registrantId));
 
   // --- Best-effort extras: each isolated so one failing never breaks the registration itself. ---
@@ -129,9 +136,9 @@ app.post("/:slug", async (c) => {
   const asWarning = (label: string, err: unknown) => warnings.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
 
   const ghlTags = parseJson<string[]>(route.ghlTagsJson);
-  if (ghlTags && ghlTags.length > 0) {
+  if (ghlContactId && ghlTags && ghlTags.length > 0) {
     try {
-      await addTags(effEnv, contact.id, ghlTags);
+      await addTags(effEnv, ghlContactId, ghlTags);
     } catch (err) {
       asWarning("GHL tags", err);
     }
@@ -178,6 +185,27 @@ app.post("/:slug", async (c) => {
     }
   }
 
+  const outboundWebhookConfig = parseJson<OutboundWebhookConfig>(route.outboundWebhookConfigJson);
+  if (outboundWebhookConfig?.enabled && outboundWebhookConfig.url) {
+    try {
+      await forwardWebhook(outboundWebhookConfig.url, {
+        ...body,
+        zoom: {
+          eventId: event.id,
+          topic: event.topic,
+          startTimeEastern: tokens.webinarDateEastern,
+          startTimeUtc: tokens.webinarDateUtc,
+          joinUrl: tokens.joinUrl,
+          shortJoinUrl: tokens.shortJoinUrl,
+          registrantId: tokens.zoomRegistrantId,
+        },
+        registrant: { email, firstName, lastName, phone },
+      });
+    } catch (err) {
+      asWarning("Outbound webhook", err);
+    }
+  }
+
   return c.json(
     {
       registrantId,
@@ -185,7 +213,7 @@ app.post("/:slug", async (c) => {
       zoomEventId: event.id,
       joinUrl: zoomRegistrant.join_url,
       shortJoinUrl,
-      ghlContactId: contact.id,
+      ghlContactId: ghlContactId ?? null,
       ...(warnings.length > 0 ? { warnings } : {}),
     },
     201

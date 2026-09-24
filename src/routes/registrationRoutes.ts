@@ -16,13 +16,15 @@ type GhlOutputField = MappingEntry & { fieldId: string; fieldName?: string };
 type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
 type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
 type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
+type OutboundWebhookConfig = { enabled: boolean; url?: string };
 
 type CreateBody = {
   type: "webinar" | "meeting";
   selectionMode: "upcoming" | "specific";
   seriesId?: string;
   specificZoomEventId?: string;
-  ghlWorkflowId: string;
+  ghlEnabled?: boolean; // default true
+  ghlWorkflowId?: string; // required only when ghlEnabled !== false
   ghlLocationId?: string;
   fieldMapping?: Record<string, string>;
   ghlTags?: string[];
@@ -30,6 +32,7 @@ type CreateBody = {
   sheetsConfig?: SheetsConfig;
   sendblueConfig?: SendblueConfig;
   hyrosConfig?: HyrosConfig;
+  outboundWebhookConfig?: OutboundWebhookConfig;
 };
 
 function integrationColumns(body: Partial<CreateBody>): Record<string, unknown> {
@@ -39,13 +42,19 @@ function integrationColumns(body: Partial<CreateBody>): Record<string, unknown> 
   if (body.sheetsConfig) update.sheetsConfigJson = JSON.stringify(body.sheetsConfig);
   if (body.sendblueConfig) update.sendblueConfigJson = JSON.stringify(body.sendblueConfig);
   if (body.hyrosConfig) update.hyrosConfigJson = JSON.stringify(body.hyrosConfig);
+  if (body.outboundWebhookConfig) update.outboundWebhookConfigJson = JSON.stringify(body.outboundWebhookConfig);
   return update;
 }
 
 app.post("/", async (c) => {
   const body = await c.req.json<CreateBody>();
-  if (!body.type || !body.selectionMode || !body.ghlWorkflowId) {
-    return c.json({ error: "type, selectionMode, and ghlWorkflowId are required" }, 400);
+  const ghlEnabled = body.ghlEnabled !== false;
+
+  if (!body.type || !body.selectionMode) {
+    return c.json({ error: "type and selectionMode are required" }, 400);
+  }
+  if (ghlEnabled && !body.ghlWorkflowId) {
+    return c.json({ error: "ghlWorkflowId is required unless ghlEnabled is false" }, 400);
   }
   if (body.selectionMode === "upcoming" && !body.seriesId) {
     return c.json({ error: "seriesId is required when selectionMode=upcoming" }, 400);
@@ -57,7 +66,7 @@ app.post("/", async (c) => {
   const db = getDb(c.env.DB);
   const id = crypto.randomUUID();
   const slug = generateShortCode(10);
-  const ghlLocationId = body.ghlLocationId ?? (await withCredentials(db, c.env)).GHL_DEFAULT_LOCATION_ID;
+  const ghlLocationId = ghlEnabled ? body.ghlLocationId ?? (await withCredentials(db, c.env)).GHL_DEFAULT_LOCATION_ID : "";
 
   await db.insert(schema.registrationRoutes).values({
     id,
@@ -66,8 +75,9 @@ app.post("/", async (c) => {
     selectionMode: body.selectionMode,
     seriesId: body.seriesId,
     specificZoomEventId: body.specificZoomEventId,
-    ghlWorkflowId: body.ghlWorkflowId,
-    ghlLocationId,
+    ghlEnabled,
+    ghlWorkflowId: ghlEnabled ? body.ghlWorkflowId ?? "" : "",
+    ghlLocationId: ghlLocationId ?? "",
     fieldMappingJson: body.fieldMapping ? JSON.stringify(body.fieldMapping) : null,
     ...integrationColumns(body),
   });
@@ -98,6 +108,7 @@ app.patch("/:id", async (c) => {
   if (body.selectionMode) update.selectionMode = body.selectionMode;
   if (body.seriesId !== undefined) update.seriesId = body.seriesId;
   if (body.specificZoomEventId !== undefined) update.specificZoomEventId = body.specificZoomEventId;
+  if (body.ghlEnabled !== undefined) update.ghlEnabled = body.ghlEnabled;
   if (body.ghlWorkflowId) update.ghlWorkflowId = body.ghlWorkflowId;
   if (body.ghlLocationId) update.ghlLocationId = body.ghlLocationId;
   if (body.fieldMapping) update.fieldMappingJson = JSON.stringify(body.fieldMapping);
