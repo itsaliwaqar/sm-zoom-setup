@@ -219,6 +219,14 @@ app.post("/:slug", async (c) => {
       joinUrl: zoomRegistrant.join_url,
       shortJoinUrl,
       ghlContactId: ghlContactId ?? null,
+      webinar: {
+        topic: event.topic,
+        type: event.type,
+        startTimeUtc: event.startTimeUtc.toISOString(),
+        startTimeEastern: tokens.webinarDateEastern,
+        durationMinutes: event.durationMinutes,
+        timezone: event.startTimeIanaTz,
+      },
       ...(warnings.length > 0 ? { warnings } : {}),
     },
     201

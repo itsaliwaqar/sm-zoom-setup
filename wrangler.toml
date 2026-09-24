@@ -4,9 +4,13 @@ compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Static admin UI, served from /admin/*
+# run_worker_first ensures ALL requests (including GET) hit the Worker before the asset layer,
+# so dynamic routes like /webhooks/register/:slug are not intercepted with a 404 by the asset
+# handler just because no matching file exists.
 [assets]
 directory = "./public"
 binding = "ASSETS"
+run_worker_first = true
 
 # Two schedules: every 15 min runs due-job creation + attendance sync; every 30 min proactively
 # refreshes the Zoom access token (it expires hourly) - see scheduled() in src/index.ts.

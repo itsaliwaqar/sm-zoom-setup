@@ -59,6 +59,10 @@ app.onError((err, c) => {
   return c.json({ error: err.message || "internal error" }, 500);
 });
 
+// Fallback: serve static assets (admin UI, etc.) for any path the Worker didn't handle.
+// Required because run_worker_first=true sends every request through this Worker first.
+app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+
 export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
