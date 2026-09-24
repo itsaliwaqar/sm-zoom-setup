@@ -28,6 +28,17 @@ import {
 
 const app = new Hono<AppEnv>();
 
+app.get("/:slug", async (c) => {
+  const db = getDb(c.env.DB);
+  const route = await db
+    .select()
+    .from(schema.registrationRoutes)
+    .where(eq(schema.registrationRoutes.slug, c.req.param("slug")))
+    .get();
+  if (!route || !route.enabled) return c.json({ error: "not found" }, 404);
+  return c.json({ ok: true });
+});
+
 app.post("/:slug", async (c) => {
   const db = getDb(c.env.DB);
   const route = await db

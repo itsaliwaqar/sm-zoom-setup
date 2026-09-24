@@ -720,6 +720,7 @@ function buildMappingList(leftBuilder, initialRows = [], addLabel = "Add row") {
   return {
     container: el("div", { class: "flex flex-col gap-2" }, [rowsHost, btn(addLabel, { variant: "secondary", icon: "plus", onClick: () => addRow() })]),
     getRows: () => rows.map((r) => ({ ...r.left.getValue(), ...r.valueSource.getValue() })),
+    setRows: (newRows) => { rowsHost.innerHTML = ""; rows.splice(0); for (const r of newRows) addRow(r); },
   };
 }
 
@@ -735,6 +736,8 @@ async function tabRoutes(section) {
 
   const msgHost = el("div", {});
   section.appendChild(msgHost);
+
+  let editingId = null;
 
   const baseFields = el("div", { class: "grid sm:grid-cols-2 gap-3" }, [
     field("Type", select([{ value: "webinar", label: "Webinar" }, { value: "meeting", label: "Meeting" }], { name: "type" })),
@@ -833,6 +836,9 @@ async function tabRoutes(section) {
     ]),
   ]);
 
+  const routeSubmitBtn = btn("Create route", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" });
+  const routeCancelLink = el("button", { type: "button", class: "text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline hidden", text: "Cancel edit" });
+
   const form = el("form", { class: "flex flex-col gap-4" }, [
     baseFields,
     ghlSection,
@@ -840,8 +846,45 @@ async function tabRoutes(section) {
     sendblueSection,
     hyrosSection,
     outboundSection,
-    btn("Create route", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" }),
+    el("div", { class: "flex items-center gap-4" }, [routeSubmitBtn, routeCancelLink]),
   ]);
+
+  function enterEditMode(r) {
+    editingId = r.id;
+    form.querySelector('[name=type]').value = r.type;
+    form.querySelector('[name=selectionMode]').value = r.selectionMode;
+    form.querySelector('[name=seriesId]').value = r.seriesId || '';
+    form.querySelector('[name=specificZoomEventId]').value = r.specificZoomEventId || '';
+    ghlEnabledCheckbox.checked = !!r.ghlEnabled;
+    ghlWorkflowIdInput.value = r.ghlWorkflowId || '';
+    ghlLocationIdInput.value = r.ghlLocationId || '';
+    ghlTagsEl.value = (r.ghlTagsJson ? JSON.parse(r.ghlTagsJson) : []).join(', ');
+    ghlFieldsMapper.setRows(r.ghlOutputFieldsJson ? JSON.parse(r.ghlOutputFieldsJson) : []);
+    syncGhlEnabled();
+    const sheetsConfig = r.sheetsConfigJson ? JSON.parse(r.sheetsConfigJson) : null;
+    if (sheetsConfig) { sheetsEnabled.checked = !!sheetsConfig.enabled; sheetsIdInput.value = sheetsConfig.spreadsheetId || ''; sheetsNameInput.value = sheetsConfig.sheetName || ''; sheetsMapper.setRows(sheetsConfig.columns || []); }
+    const sendblueConfig = r.sendblueConfigJson ? JSON.parse(r.sendblueConfigJson) : null;
+    if (sendblueConfig) { sendblueEnabled.checked = !!sendblueConfig.enabled; sendblueTagsEl.value = (sendblueConfig.tags || []).join(', '); sendblueMapper.setRows(sendblueConfig.customVariables || []); }
+    const hyrosConfig = r.hyrosConfigJson ? JSON.parse(r.hyrosConfigJson) : null;
+    if (hyrosConfig) { hyrosEnabled.checked = !!hyrosConfig.enabled; hyrosTagsEl.value = (hyrosConfig.tags || []).join(', '); }
+    const outboundConfig = r.outboundWebhookConfigJson ? JSON.parse(r.outboundWebhookConfigJson) : null;
+    if (outboundConfig) { outboundEnabled.checked = !!outboundConfig.enabled; outboundUrlInput.value = outboundConfig.url || ''; }
+    routeSubmitBtn.querySelector('span').textContent = 'Update route';
+    routeCancelLink.classList.remove('hidden');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function exitEditMode() {
+    editingId = null;
+    form.reset();
+    ghlEnabledCheckbox.checked = true;
+    syncGhlEnabled();
+    ghlFieldsMapper.setRows([]);
+    sheetsMapper.setRows([]);
+    sendblueMapper.setRows([]);
+    routeSubmitBtn.querySelector('span').textContent = 'Create route';
+    routeCancelLink.classList.add('hidden');
+  }
+  routeCancelLink.addEventListener('click', exitEditMode);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
 
   const tableHost = el("div", {});
@@ -852,13 +895,14 @@ async function tabRoutes(section) {
     tableHost.innerHTML = "";
     tableHost.appendChild(
       table(
-        ["Type", "Mode", "GHL", "Enabled", "Webhook URL"],
+        ["Type", "Mode", "GHL", "Enabled", "Webhook URL", ""],
         rows.map((r) => [
           td(badge(r.type, r.type === "webinar" ? "indigo" : "slate")),
           td(r.selectionMode),
           td(badge(r.ghlEnabled ? "on" : "off", r.ghlEnabled ? "green" : "slate")),
           td(badge(r.enabled ? "yes" : "no", r.enabled ? "green" : "red")),
           td(el("div", { class: "flex items-center gap-1" }, [codeValue(r.webhookUrl), copyButton(r.webhookUrl)])),
+          td(iconBtn("edit", { title: "Edit", onClick: () => enterEditMode(r) })),
         ]
       )
     ));
@@ -878,11 +922,17 @@ async function tabRoutes(section) {
     fd.hyrosConfig = { enabled: hyrosEnabled.checked, tags: parseTags(hyrosTagsEl) };
     fd.outboundWebhookConfig = { enabled: outboundEnabled.checked, url: outboundUrlInput.value };
     try {
-      const created = await api("/api/registration-routes", { method: "POST", body: JSON.stringify(fd) });
-      banner(msgHost, `Created. Webhook URL: ${created.webhookUrl}`, "ok");
-      form.reset();
-      ghlEnabledCheckbox.checked = true;
-      syncGhlEnabled();
+      if (editingId) {
+        await api(`/api/registration-routes/${editingId}`, { method: "PATCH", body: JSON.stringify(fd) });
+        banner(msgHost, "Route updated.", "ok");
+        exitEditMode();
+      } else {
+        const created = await api("/api/registration-routes", { method: "POST", body: JSON.stringify(fd) });
+        banner(msgHost, `Created. Webhook URL: ${created.webhookUrl}`, "ok");
+        form.reset();
+        ghlEnabledCheckbox.checked = true;
+        syncGhlEnabled();
+      }
       load();
     } catch (err) {
       banner(msgHost, err.message, "err");
