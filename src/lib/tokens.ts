@@ -13,6 +13,8 @@ export const TOKEN_KEYS = [
   "shortJoinUrl",
   "zoomRegistrantId",
   "routeSlug",
+  "attendanceStatus", // only populated once attendance sync has run; "" at registration time
+  "attendedMinutes",
 ] as const;
 
 export type TokenKey = (typeof TOKEN_KEYS)[number];
@@ -29,6 +31,8 @@ export type TokenContext = {
   shortJoinUrl: string;
   zoomRegistrantId: string;
   routeSlug: string;
+  attendanceStatus?: string;
+  attendedMinutes?: number;
 };
 
 export function resolveTokens(ctx: TokenContext): Record<TokenKey, string> {
@@ -44,6 +48,8 @@ export function resolveTokens(ctx: TokenContext): Record<TokenKey, string> {
     shortJoinUrl: ctx.shortJoinUrl,
     zoomRegistrantId: ctx.zoomRegistrantId,
     routeSlug: ctx.routeSlug,
+    attendanceStatus: ctx.attendanceStatus ?? "",
+    attendedMinutes: ctx.attendedMinutes !== undefined ? String(ctx.attendedMinutes) : "",
   };
 }
 
@@ -58,3 +64,23 @@ export function renderMapping(entry: MappingEntry, tokens: Record<TokenKey, stri
   if (entry.token && entry.token in tokens) return tokens[entry.token];
   return "";
 }
+
+// Shared by registerWebhook.ts and attendance.ts for parsing the JSON config blobs stored on a
+// registration route (ghlOutputFieldsJson, sheetsConfigJson, etc.) - never throws.
+export function parseJson<T>(raw: string | null | undefined): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+// Shapes of the JSON config blobs stored on a registration_routes row - shared by
+// registerWebhook.ts (registration time) and attendance.ts (post-event) so both act on the
+// same per-route configuration.
+export type GhlOutputField = MappingEntry & { fieldId: string; fieldName?: string };
+export type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
+export type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
+export type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
+export type OutboundWebhookConfig = { enabled: boolean; url?: string };

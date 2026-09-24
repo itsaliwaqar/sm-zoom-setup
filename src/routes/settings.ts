@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
-import { setSetting } from "../lib/settings";
+import { getSetting, setSetting } from "../lib/settings";
 import { attendedTag, noShowTag } from "../lib/ghl";
 import { clearAccessTokenCache, getAccessToken } from "../lib/zoom";
 import { getCredentialStatuses, resolveCredentialKey, withCredentials } from "../lib/credentials";
@@ -12,10 +12,20 @@ const app = new Hono<AppEnv>();
 
 app.get("/", requireAuth, async (c) => {
   const db = getDb(c.env.DB);
-  const [attended, noShow, effEnv] = await Promise.all([attendedTag(db, c.env), noShowTag(db, c.env), withCredentials(db, c.env)]);
+  const [attended, noShow, hyrosAttended, hyrosNoShow, bufferMinutes, effEnv] = await Promise.all([
+    attendedTag(db, c.env),
+    noShowTag(db, c.env),
+    getSetting(db, "hyros_attended_tag").then((v) => v || "Webinar Attended"),
+    getSetting(db, "hyros_no_show_tag").then((v) => v || "Webinar No-Show"),
+    getSetting(db, "attendance_sync_buffer_minutes").then((v) => (v ? Number(v) : 10)),
+    withCredentials(db, c.env),
+  ]);
   return c.json({
     ghlAttendedTag: attended,
     ghlNoShowTag: noShow,
+    hyrosAttendedTag: hyrosAttended,
+    hyrosNoShowTag: hyrosNoShow,
+    attendanceSyncBufferMinutes: bufferMinutes,
     publicBaseUrl: getBaseUrl(c),
     zoomConfigured: Boolean(effEnv.ZOOM_ACCOUNT_ID && effEnv.ZOOM_CLIENT_ID && effEnv.ZOOM_CLIENT_SECRET),
     ghlConfigured: Boolean(effEnv.GHL_PRIVATE_TOKEN && effEnv.GHL_DEFAULT_LOCATION_ID),
@@ -23,10 +33,19 @@ app.get("/", requireAuth, async (c) => {
 });
 
 app.patch("/", requireAuth, async (c) => {
-  const body = await c.req.json<{ ghlAttendedTag?: string; ghlNoShowTag?: string }>();
+  const body = await c.req.json<{
+    ghlAttendedTag?: string;
+    ghlNoShowTag?: string;
+    hyrosAttendedTag?: string;
+    hyrosNoShowTag?: string;
+    attendanceSyncBufferMinutes?: number;
+  }>();
   const db = getDb(c.env.DB);
   if (body.ghlAttendedTag) await setSetting(db, "ghl_attended_tag", body.ghlAttendedTag);
   if (body.ghlNoShowTag) await setSetting(db, "ghl_no_show_tag", body.ghlNoShowTag);
+  if (body.hyrosAttendedTag) await setSetting(db, "hyros_attended_tag", body.hyrosAttendedTag);
+  if (body.hyrosNoShowTag) await setSetting(db, "hyros_no_show_tag", body.hyrosNoShowTag);
+  if (body.attendanceSyncBufferMinutes !== undefined) await setSetting(db, "attendance_sync_buffer_minutes", String(body.attendanceSyncBufferMinutes));
   return c.json({ ok: true });
 });
 

@@ -27,6 +27,9 @@ const ICONS = {
   mail: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="3,7 12,13 21,7"/></svg>`,
   video: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10.5l5-3v9l-5-3z"/></svg>`,
   chevronDown: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6,9 12,15 18,9"/></svg>`,
+  edit: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l11-11a2 2 0 0 0-4-4L4 16v4z"/><line x1="13" y1="6.5" x2="17.5" y2="11"/></svg>`,
+  download: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7,10 12,15 17,10"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>`,
+  play: (cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="6,4 20,12 6,20"/></svg>`,
 };
 
 function icon(name, cls = "w-5 h-5") {

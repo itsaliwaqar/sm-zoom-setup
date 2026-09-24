@@ -5,6 +5,7 @@ import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import type { RecurrenceRule } from "../lib/time";
 import { requireAuth } from "../lib/auth";
+import { reconcileOnceJob, reconcileRecurringJob } from "../scheduled";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
@@ -85,6 +86,22 @@ app.delete("/:id", async (c) => {
   const db = getDb(c.env.DB);
   await db.delete(schema.scheduledJobs).where(eq(schema.scheduledJobs.id, c.req.param("id")));
   return c.json({ ok: true });
+});
+
+// Reconciles this job immediately instead of waiting for the next 15-minute cron tick.
+app.post("/:id/run-now", async (c) => {
+  const db = getDb(c.env.DB);
+  const job = await db.select().from(schema.scheduledJobs).where(eq(schema.scheduledJobs.id, c.req.param("id"))).get();
+  if (!job) return c.json({ error: "not found" }, 404);
+
+  if (job.mode === "once") {
+    await reconcileOnceJob(db, c.env, job);
+  } else {
+    await reconcileRecurringJob(db, c.env, job);
+  }
+
+  const updated = await db.select().from(schema.scheduledJobs).where(eq(schema.scheduledJobs.id, job.id)).get();
+  return c.json(updated);
 });
 
 export default app;

@@ -7,16 +7,10 @@ import { generateShortCode } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
 import { requireAuth } from "../lib/auth";
 import { withCredentials } from "../lib/credentials";
-import type { MappingEntry } from "../lib/tokens";
+import type { GhlOutputField, SheetsConfig, SendblueConfig, HyrosConfig, OutboundWebhookConfig } from "../lib/tokens";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
-
-type GhlOutputField = MappingEntry & { fieldId: string; fieldName?: string };
-type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
-type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
-type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
-type OutboundWebhookConfig = { enabled: boolean; url?: string };
 
 type CreateBody = {
   type: "webinar" | "meeting";

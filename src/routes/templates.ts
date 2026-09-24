@@ -48,4 +48,18 @@ app.get("/:id", async (c) => {
   return c.json(row);
 });
 
+app.patch("/:id", async (c) => {
+  const body = await c.req.json<{ name?: string; hostEmail?: string; zoomPayload?: ZoomCreatePayload }>();
+  const db = getDb(c.env.DB);
+  const update: Record<string, unknown> = {};
+  if (body.name) update.name = body.name;
+  if (body.hostEmail) update.hostEmail = body.hostEmail;
+  if (body.zoomPayload) update.zoomPayloadJson = JSON.stringify(body.zoomPayload);
+
+  await db.update(schema.templates).set(update).where(eq(schema.templates.id, c.req.param("id")));
+  const row = await db.select().from(schema.templates).where(eq(schema.templates.id, c.req.param("id"))).get();
+  if (!row) return c.json({ error: "not found" }, 404);
+  return c.json(row);
+});
+
 export default app;

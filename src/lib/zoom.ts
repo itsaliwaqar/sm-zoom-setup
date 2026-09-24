@@ -121,6 +121,32 @@ export async function getWebinar(env: Bindings, webinarId: string | number) {
   return zoomJson<ZoomCreateResult>(env, `/webinars/${webinarId}`);
 }
 
+// Zoom's update endpoint accepts a partial payload and returns 204 No Content on success.
+export async function updateMeeting(env: Bindings, meetingId: string | number, payload: Partial<ZoomCreatePayload>) {
+  return zoomJson<void>(env, `/meetings/${meetingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateWebinar(env: Bindings, webinarId: string | number, payload: Partial<ZoomCreatePayload>) {
+  return zoomJson<void>(env, `/webinars/${webinarId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export async function updateZoomEvent(env: Bindings, type: ZoomEventType, zoomEventId: string | number, payload: Partial<ZoomCreatePayload>) {
+  return type === "webinar" ? updateWebinar(env, zoomEventId, payload) : updateMeeting(env, zoomEventId, payload);
+}
+
+// Zoom permanently removes the meeting/webinar - there's no undo on Zoom's side either.
+export async function deleteMeeting(env: Bindings, meetingId: string | number) {
+  return zoomJson<void>(env, `/meetings/${meetingId}`, { method: "DELETE" });
+}
+
+export async function deleteWebinar(env: Bindings, webinarId: string | number) {
+  return zoomJson<void>(env, `/webinars/${webinarId}`, { method: "DELETE" });
+}
+
+export async function deleteZoomEvent(env: Bindings, type: ZoomEventType, zoomEventId: string | number) {
+  return type === "webinar" ? deleteWebinar(env, zoomEventId) : deleteMeeting(env, zoomEventId);
+}
+
 export type ZoomRegistrant = {
   email: string;
   first_name: string;

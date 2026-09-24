@@ -15,24 +15,18 @@ import { forward as forwardWebhook } from "../lib/outboundWebhook";
 import { formatEastern } from "../lib/time";
 import { getBaseUrl } from "../lib/baseUrl";
 import { withCredentials } from "../lib/credentials";
-import { renderMapping, resolveTokens, type MappingEntry } from "../lib/tokens";
+import {
+  renderMapping,
+  resolveTokens,
+  parseJson,
+  type GhlOutputField,
+  type SheetsConfig,
+  type SendblueConfig,
+  type HyrosConfig,
+  type OutboundWebhookConfig,
+} from "../lib/tokens";
 
 const app = new Hono<AppEnv>();
-
-type GhlOutputField = MappingEntry & { fieldId: string };
-type SheetsConfig = { enabled: boolean; spreadsheetId?: string; sheetName?: string; columns: (MappingEntry & { header: string })[] };
-type SendblueConfig = { enabled: boolean; tags: string[]; customVariables: (MappingEntry & { label: string })[] };
-type HyrosConfig = { enabled: boolean; tags: string[]; source?: string };
-type OutboundWebhookConfig = { enabled: boolean; url?: string };
-
-function parseJson<T>(raw: string | null): T | undefined {
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return undefined;
-  }
-}
 
 app.post("/:slug", async (c) => {
   const db = getDb(c.env.DB);

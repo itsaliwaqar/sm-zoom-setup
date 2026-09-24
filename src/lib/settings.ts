@@ -5,6 +5,9 @@ import * as schema from "../db/schema";
 export type SettingKey =
   | "ghl_attended_tag"
   | "ghl_no_show_tag"
+  | "hyros_attended_tag"
+  | "hyros_no_show_tag"
+  | "attendance_sync_buffer_minutes"
   | "zoom_account_id"
   | "zoom_client_id"
   | "zoom_client_secret"
