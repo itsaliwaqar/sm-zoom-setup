@@ -608,7 +608,7 @@ async function buildCredentialsCard(msgHost, onSaved) {
 
   for (const r of rows) {
     const inputEl = input({
-      name: r.key,
+      name: r.formKey,
       type: r.secret ? "password" : "text",
       placeholder: r.secret ? (r.masked ? `Currently ${r.masked} - leave blank to keep` : "Not set") : r.value || "Not set",
       value: r.secret ? "" : r.value || "",

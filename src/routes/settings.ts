@@ -4,7 +4,7 @@ import { getDb } from "../db/client";
 import { setSetting } from "../lib/settings";
 import { attendedTag, noShowTag } from "../lib/ghl";
 import { clearAccessTokenCache, getAccessToken } from "../lib/zoom";
-import { getCredentialStatuses, withCredentials, type CredentialFieldKey } from "../lib/credentials";
+import { getCredentialStatuses, resolveCredentialKey, withCredentials } from "../lib/credentials";
 import { requireAdminRole, requireAuth } from "../lib/auth";
 import { getBaseUrl } from "../lib/baseUrl";
 
@@ -59,23 +59,21 @@ app.get("/credentials", requireAdminRole, async (c) => {
 });
 
 app.patch("/credentials", requireAdminRole, async (c) => {
-  const body = await c.req.json<Partial<Record<"zoomAccountId" | "zoomClientId" | "zoomClientSecret" | "ghlPrivateToken" | "ghlDefaultLocationId", string>>>();
-  const camelToKey: Record<string, CredentialFieldKey> = {
-    zoomAccountId: "zoom_account_id",
-    zoomClientId: "zoom_client_id",
-    zoomClientSecret: "zoom_client_secret",
-    ghlPrivateToken: "ghl_private_token",
-    ghlDefaultLocationId: "ghl_default_location_id",
-  };
-
+  const body = await c.req.json<Record<string, string>>();
   const db = getDb(c.env.DB);
+
+  let updatedCount = 0;
   let touchedZoom = false;
-  for (const [camel, value] of Object.entries(body)) {
+  for (const [formKey, value] of Object.entries(body)) {
     if (!value) continue; // blank means "don't change this field"
-    const key = camelToKey[camel];
+    const key = resolveCredentialKey(formKey);
     if (!key) continue;
     await setSetting(db, key, value);
+    updatedCount++;
     if (key.startsWith("zoom_")) touchedZoom = true;
+  }
+  if (updatedCount === 0) {
+    return c.json({ error: "no recognized credential fields were provided" }, 400);
   }
   if (touchedZoom) await clearAccessTokenCache(c.env);
 
