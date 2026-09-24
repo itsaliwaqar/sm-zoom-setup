@@ -6,6 +6,7 @@ import * as schema from "../db/schema";
 import { generateShortCode } from "../lib/shortlinks";
 import { getBaseUrl } from "../lib/baseUrl";
 import { requireAuth } from "../lib/auth";
+import { withCredentials } from "../lib/credentials";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
@@ -35,6 +36,7 @@ app.post("/", async (c) => {
   const db = getDb(c.env.DB);
   const id = crypto.randomUUID();
   const slug = generateShortCode(10);
+  const ghlLocationId = body.ghlLocationId ?? (await withCredentials(db, c.env)).GHL_DEFAULT_LOCATION_ID;
 
   await db.insert(schema.registrationRoutes).values({
     id,
@@ -44,7 +46,7 @@ app.post("/", async (c) => {
     seriesId: body.seriesId,
     specificZoomEventId: body.specificZoomEventId,
     ghlWorkflowId: body.ghlWorkflowId,
-    ghlLocationId: body.ghlLocationId ?? c.env.GHL_DEFAULT_LOCATION_ID,
+    ghlLocationId,
     fieldMappingJson: body.fieldMapping ? JSON.stringify(body.fieldMapping) : null,
   });
 

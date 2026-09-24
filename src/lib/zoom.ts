@@ -46,6 +46,12 @@ export async function refreshAccessToken(env: Bindings): Promise<void> {
   await storeToken(env, token);
 }
 
+// Call whenever Zoom credentials change (e.g. saved from the Settings tab) so the next request
+// re-authenticates instead of reusing a token minted under the old credentials.
+export async function clearAccessTokenCache(env: Bindings): Promise<void> {
+  await env.CACHE_KV.delete(TOKEN_CACHE_KEY);
+}
+
 async function zoomFetch(env: Bindings, path: string, init: RequestInit = {}): Promise<Response> {
   const token = await getAccessToken(env);
   const res = await fetch(`${ZOOM_API_BASE}${path}`, {

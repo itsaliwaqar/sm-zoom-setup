@@ -2,7 +2,14 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import * as schema from "../db/schema";
 
-export type SettingKey = "ghl_attended_tag" | "ghl_no_show_tag";
+export type SettingKey =
+  | "ghl_attended_tag"
+  | "ghl_no_show_tag"
+  | "zoom_account_id"
+  | "zoom_client_id"
+  | "zoom_client_secret"
+  | "ghl_private_token"
+  | "ghl_default_location_id";
 
 export async function getSetting(db: Db, key: SettingKey): Promise<string | undefined> {
   const row = await db.select().from(schema.settings).where(eq(schema.settings.key, key)).get();

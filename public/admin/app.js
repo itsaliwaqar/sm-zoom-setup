@@ -273,6 +273,7 @@ const NAV = [
   { id: "registrants", label: "Registrants", icon: "users" },
   { id: "links", label: "Short Links", icon: "link" },
   { id: "docs", label: "API Docs", icon: "list" },
+  { id: "scopes", label: "Scopes", icon: "lock" },
   { id: "settings", label: "Settings", icon: "sliders" },
   { id: "users", label: "Users", icon: "user", adminOnly: true },
 ];

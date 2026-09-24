@@ -4,6 +4,7 @@ import type { Bindings } from "../env";
 import * as schema from "../db/schema";
 import { getParticipantsReport } from "./zoom";
 import { addTags, attendedTag, ensureCustomFields, noShowTag, upsertContact } from "./ghl";
+import { withCredentials } from "./credentials";
 
 // Sums each attendee's total time present (in seconds) across all of their join/leave sessions.
 function aggregateDurationsByEmail(participants: { user_email?: string; duration: number }[]): Map<string, number> {
@@ -21,7 +22,8 @@ export type EventRow = typeof schema.zoomEvents.$inferSelect;
 // Pulls the Zoom attendee report for one event, marks each registrant attended/no-show,
 // and tags + updates the corresponding GHL contact. Idempotent - safe to re-run for the same event.
 export async function processEventAttendance(db: Db, env: Bindings, event: EventRow): Promise<void> {
-  const participants = await getParticipantsReport(env, event.type, event.zoomId);
+  const effEnv = await withCredentials(db, env);
+  const participants = await getParticipantsReport(effEnv, event.type, event.zoomId);
   const durationsByEmail = aggregateDurationsByEmail(participants);
 
   const eventRegistrants = await db
@@ -49,15 +51,15 @@ export async function processEventAttendance(db: Db, env: Bindings, event: Event
       .from(schema.registrationRoutes)
       .where(eq(schema.registrationRoutes.id, registrant.registrationRouteId))
       .get();
-    const locationId = route?.ghlLocationId ?? env.GHL_DEFAULT_LOCATION_ID;
+    const locationId = route?.ghlLocationId ?? effEnv.GHL_DEFAULT_LOCATION_ID;
 
-    const fieldIds = await ensureCustomFields(db, env, locationId);
-    await upsertContact(env, {
+    const fieldIds = await ensureCustomFields(db, effEnv, locationId);
+    await upsertContact(effEnv, {
       locationId,
       email: registrant.email,
       customFields: [{ id: fieldIds.attended_minutes, value: String(attendedMinutes) }],
     });
-    await addTags(env, registrant.ghlContactId, [attended ? attendedTagName : noShowTagName]);
+    await addTags(effEnv, registrant.ghlContactId, [attended ? attendedTagName : noShowTagName]);
   }
 
   await db

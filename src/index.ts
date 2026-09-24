@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { AppEnv, Bindings } from "./env";
 import { processDueJobs, processAttendanceSync } from "./scheduled";
 import { refreshAccessToken } from "./lib/zoom";
+import { getDb } from "./db/client";
+import { withCredentials } from "./lib/credentials";
 
 import auth from "./routes/auth";
 import users from "./routes/users";
@@ -51,7 +53,7 @@ export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
     if (event.cron === "*/30 * * * *") {
-      ctx.waitUntil(refreshAccessToken(env));
+      ctx.waitUntil(withCredentials(getDb(env.DB), env).then(refreshAccessToken));
       return;
     }
     ctx.waitUntil(processDueJobs(env));

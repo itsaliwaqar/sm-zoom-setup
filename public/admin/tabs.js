@@ -542,6 +542,127 @@ async function tabDocs(section) {
   }
 }
 
+/* ================= Scopes ================= */
+const ZOOM_SCOPES = [
+  { scope: "meeting:write:meeting:admin", purpose: "Create meetings" },
+  { scope: "meeting:read:meeting:admin", purpose: "Read meeting details" },
+  { scope: "webinar:write:webinar:admin", purpose: "Create webinars" },
+  { scope: "webinar:read:webinar:admin", purpose: "Read webinar details" },
+  { scope: "meeting:write:registrant:admin", purpose: "Register attendees (meeting)" },
+  { scope: "meeting:read:registrant:admin", purpose: "Read meeting registrants" },
+  { scope: "webinar:write:registrant:admin", purpose: "Register attendees (webinar)" },
+  { scope: "webinar:read:registrant:admin", purpose: "Read webinar registrants" },
+  { scope: "user:read:user:admin", purpose: "Resolve the host account by email" },
+  { scope: "report:read:list_meeting_participants:admin", purpose: "Post-event attendance report (meetings)" },
+  { scope: "report:read:list_webinar_participants:admin", purpose: "Post-event attendance report (webinars)" },
+];
+const GHL_SCOPES = [
+  { scope: "Contacts - Read & Write", purpose: "Create/update contacts, add tags (attended/no-show)" },
+  { scope: "Custom Fields - Read & Write", purpose: "Auto-create the 5 contact fields this app writes to" },
+  { scope: "Workflows - Read", purpose: "Look up workflow IDs to enroll contacts into" },
+];
+
+async function tabScopes(section) {
+  section.appendChild(pageHeader("Required Scopes", "Exact permissions this app needs from Zoom and GoHighLevel. Zoom's scope picker is searchable — search each term below."));
+
+  function scopesCard(title, rows, scopeLabel) {
+    return card([
+      el("div", { class: "p-5" }, [
+        el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3", text: title }),
+        table(
+          [scopeLabel, "Used for"],
+          rows.map((r) => [td(el("div", { class: "flex items-center gap-1" }, [el("code", { class: "font-mono text-xs text-indigo-600 dark:text-indigo-400", text: r.scope }), copyButton(r.scope)])), td(el("span", { class: "text-slate-600 dark:text-slate-400 text-sm", text: r.purpose }))])
+        ),
+      ]),
+    ]);
+  }
+
+  section.appendChild(el("div", { class: "mb-4" }, [scopesCard("Zoom — Server-to-Server OAuth app scopes", ZOOM_SCOPES, "Scope")]));
+  section.appendChild(
+    card([
+      el("div", { class: "p-5" }, [
+        el("p", { class: "text-sm text-slate-500 dark:text-slate-400", text: "Create the app at marketplace.zoom.us → Develop → Build App → Server-to-Server OAuth. The host account used for webinar creation also needs a Webinar license." }),
+      ]),
+    ], "mb-6")
+  );
+
+  section.appendChild(el("div", { class: "mb-4" }, [scopesCard("GoHighLevel — Private Integration permissions", GHL_SCOPES, "Permission")]));
+  section.appendChild(
+    card([
+      el("div", { class: "p-5" }, [
+        el("p", { class: "text-sm text-slate-500 dark:text-slate-400", text: "Create the integration in your GHL sub-account under Settings → Private Integrations. Paste the resulting token and your Location ID into the Settings tab." }),
+      ]),
+    ])
+  );
+}
+
+function sourceBadge(source) {
+  if (source === "db") return badge("saved here", "green");
+  if (source === "env") return badge("from deploy secret", "slate");
+  return badge("not set", "red");
+}
+
+async function buildCredentialsCard(msgHost, onSaved) {
+  const rows = await api("/api/settings/credentials");
+  const form = el("form", { class: "grid sm:grid-cols-2 gap-4" });
+
+  for (const r of rows) {
+    const inputEl = input({
+      name: r.key,
+      type: r.secret ? "password" : "text",
+      placeholder: r.secret ? (r.masked ? `Currently ${r.masked} - leave blank to keep` : "Not set") : r.value || "Not set",
+      value: r.secret ? "" : r.value || "",
+    });
+    form.appendChild(
+      el("div", { class: "flex flex-col gap-1.5" }, [
+        el("div", { class: "flex items-center justify-between" }, [
+          el("span", { class: "text-sm font-medium text-slate-700 dark:text-slate-300", text: r.label }),
+          sourceBadge(r.source),
+        ]),
+        inputEl,
+      ])
+    );
+  }
+
+  form.appendChild(btn("Save credentials", { type: "submit", icon: "checkCircle", cls: "sm:col-span-2 justify-center sm:w-fit" }));
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = Object.fromEntries(new FormData(form));
+    Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; }); // blank = don't change
+    if (Object.keys(fd).length === 0) return;
+    try {
+      await api("/api/settings/credentials", { method: "PATCH", body: JSON.stringify(fd) });
+      banner(msgHost, "Credentials saved - takes effect immediately, no redeploy needed.", "ok");
+      onSaved();
+    } catch (err) {
+      banner(msgHost, err.message, "err");
+    }
+  });
+
+  return card(
+    [
+      el("div", { class: "p-5" }, [
+        el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1", text: "Zoom & GHL credentials" }),
+        el("p", { class: "text-sm text-slate-500 dark:text-slate-400 mb-4", text: "Paste the values from your Zoom Server-to-Server app and GHL Private Integration - see the Scopes tab for what to create. Leave a field blank to keep its current value." }),
+        form,
+      ]),
+    ],
+    "mb-6"
+  );
+}
+
+async function renderCredentialsCard(section, msgHost) {
+  let current = el("div", {});
+  section.appendChild(current);
+  const refresh = async () => {
+    const node = await buildCredentialsCard(msgHost, refresh);
+    current.replaceWith(node);
+    current = node;
+  };
+  await refresh();
+}
+
 /* ================= Settings ================= */
 async function tabSettings(section, user) {
   section.appendChild(pageHeader("Settings", "GHL tag names, provider connection health, and API access."));
@@ -550,6 +671,10 @@ async function tabSettings(section, user) {
   section.appendChild(msgHost);
 
   const current = await api("/api/settings");
+
+  if (user.role === "admin") {
+    await renderCredentialsCard(section, msgHost);
+  }
 
   const tagForm = el("form", { class: "grid sm:grid-cols-2 gap-3" }, [
     field("Attended tag", input({ name: "ghlAttendedTag", value: current.ghlAttendedTag })),
@@ -718,6 +843,7 @@ const TABS = {
   registrants: tabRegistrants,
   links: tabLinks,
   docs: tabDocs,
+  scopes: tabScopes,
   settings: tabSettings,
   users: tabUsers,
 };

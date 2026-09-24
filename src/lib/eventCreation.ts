@@ -4,6 +4,7 @@ import type { Bindings } from "../env";
 import * as schema from "../db/schema";
 import { createZoomEvent, type ZoomCreatePayload, type ZoomEventType } from "./zoom";
 import { createShortLink, repointShortLink } from "./shortlinks";
+import { withCredentials } from "./credentials";
 
 export async function createAndStoreZoomEvent(
   db: Db,
@@ -15,7 +16,8 @@ export async function createAndStoreZoomEvent(
     series?: typeof schema.series.$inferSelect;
   }
 ) {
-  const zoomResult = await createZoomEvent(env, opts.type, opts.hostEmail, opts.payload);
+  const zoomEnv = await withCredentials(db, env);
+  const zoomResult = await createZoomEvent(zoomEnv, opts.type, opts.hostEmail, opts.payload);
 
   let shortCode: string;
   if (opts.series) {

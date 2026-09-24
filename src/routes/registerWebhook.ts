@@ -10,6 +10,7 @@ import { extractContact } from "../lib/extractContact";
 import { ensureCustomFields, enrollInWorkflow, upsertContact } from "../lib/ghl";
 import { formatEastern } from "../lib/time";
 import { getBaseUrl } from "../lib/baseUrl";
+import { withCredentials } from "../lib/credentials";
 
 const app = new Hono<AppEnv>();
 
@@ -42,7 +43,8 @@ app.post("/:slug", async (c) => {
   const { email, firstName, lastName, phone } = extractContact(body, mapping);
   if (!email) return c.json({ error: "could not find an email address in the request body" }, 400);
 
-  const zoomRegistrant = await addZoomRegistrant(c.env, type, event.zoomId, {
+  const effEnv = await withCredentials(db, c.env);
+  const zoomRegistrant = await addZoomRegistrant(effEnv, type, event.zoomId, {
     email,
     first_name: firstName || email.split("@")[0],
     last_name: lastName,
@@ -64,8 +66,8 @@ app.post("/:slug", async (c) => {
   const baseUrl = getBaseUrl(c);
   const shortJoinUrl = shortLinkUrl(baseUrl, shortCode);
 
-  const fieldIds = await ensureCustomFields(db, c.env, locationId);
-  const contact = await upsertContact(c.env, {
+  const fieldIds = await ensureCustomFields(db, effEnv, locationId);
+  const contact = await upsertContact(effEnv, {
     locationId,
     email,
     firstName,
@@ -79,7 +81,7 @@ app.post("/:slug", async (c) => {
     ],
   });
 
-  await enrollInWorkflow(c.env, contact.id, workflowId);
+  await enrollInWorkflow(effEnv, contact.id, workflowId);
 
   await db
     .update(schema.registrants)
