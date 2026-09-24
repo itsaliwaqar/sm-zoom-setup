@@ -7,7 +7,8 @@ A Cloudflare Worker that automates the Zoom webinar/meeting workflow:
 - `POST /webhooks/register/:slug` — a public webhook you paste into ClickFunnels, a GHL workflow, or Zapier. It registers the contact in Zoom, then upserts a GHL contact with the webinar date/time (Eastern), join link, short join link, and Zoom registrant ID, and enrolls them in a GHL workflow.
 - Short links (`/s/:code`), including an "evergreen" link per series that automatically repoints to whichever webinar is currently upcoming.
 - Post-event attendance sync: ~30 minutes after each event ends, pulls Zoom's attendee report and tags each contact in GHL as attended or no-show (plus a "Minutes Attended" custom field).
-- A basic admin UI at `/admin/` for managing all of the above without hand-writing API calls.
+- A modern admin UI at `/admin/` (login-based, with admin/member user roles, a Settings tab, and in-app API docs) for managing all of the above without hand-writing API calls.
+- The Zoom access token is refreshed proactively every 30 minutes (it expires hourly) via a second Cron Trigger.
 
 See `.claude`-generated plan for full architecture background if needed. Below is everything required to set this up from zero.
 
@@ -55,7 +56,7 @@ npm run db:migrate:remote
 ## 4. Set secrets
 
 ```bash
-npx wrangler secret put ADMIN_API_KEY          # any long random string — protects /api/*
+npx wrangler secret put ADMIN_API_KEY          # any long random string — for scripted/Zapier access to /api/*
 npx wrangler secret put ZOOM_ACCOUNT_ID
 npx wrangler secret put ZOOM_CLIENT_ID
 npx wrangler secret put ZOOM_CLIENT_SECRET
@@ -75,7 +76,7 @@ npm run db:migrate:local
 npm run dev
 ```
 
-Then open `http://localhost:8787/admin/` and paste your `ADMIN_API_KEY` in the top-right box.
+Then open `http://localhost:8787/admin/` — the first visit shows a **Create your admin account** screen (this only happens once, while no users exist yet). After that, everyone signs in with email/password. Admins can invite teammates from the Users tab; the shared `ADMIN_API_KEY` is only needed for scripted access (Zapier, curl, etc.) and can be copied from the Settings tab.
 
 ## 6. Deploy
 
@@ -94,7 +95,7 @@ npm run deploy
 
 ## API reference
 
-All `/api/*` routes require header `X-API-Key: <ADMIN_API_KEY>`.
+All `/api/*` routes accept either a logged-in session cookie (what the admin UI uses) or header `X-API-Key: <ADMIN_API_KEY>` (for scripts/Zapier), except `/api/users` and `/api/settings/api-key`, which require a logged-in **admin** session — the shared key can't manage accounts. This is also documented interactively in the admin UI's API Docs tab.
 
 ### Series
 ```
