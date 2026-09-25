@@ -12,7 +12,7 @@ import { appendRow } from "../lib/googleSheets";
 import { upsertContact as sendblueUpsertContact } from "../lib/sendblue";
 import { tagLead as hyrosTagLead } from "../lib/hyros";
 import { forward as forwardWebhook } from "../lib/outboundWebhook";
-import { formatEastern } from "../lib/time";
+import { formatEastern, formatEasternIso } from "../lib/time";
 import { getBaseUrl } from "../lib/baseUrl";
 import { withCredentials } from "../lib/credentials";
 import {
@@ -100,6 +100,7 @@ app.post("/:slug", async (c) => {
     phone,
     webinarTopic: event.topic,
     webinarDateEastern: formatEastern(event.startTimeUtc),
+    webinarDateEasternIso: formatEasternIso(event.startTimeUtc),
     webinarDateUtc: event.startTimeUtc.toISOString(),
     joinUrl: zoomRegistrant.join_url,
     shortJoinUrl,
@@ -224,6 +225,7 @@ app.post("/:slug", async (c) => {
         type: event.type,
         startTimeUtc: event.startTimeUtc.toISOString(),
         startTimeEastern: tokens.webinarDateEastern,
+        startTimeEasternIso: tokens.webinarDateEasternIso,
         durationMinutes: event.durationMinutes,
         timezone: event.startTimeIanaTz,
       },

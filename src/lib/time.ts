@@ -76,3 +76,33 @@ export function formatEastern(date: Date): string {
   }).format(date);
   return `${datePart} at ${timePart}`;
 }
+
+// Machine-readable ISO 8601 string for the *same instant*, but expressed as Eastern wall-clock
+// time with Eastern's actual UTC offset (-05:00 in EST, -04:00 in EDT) - e.g.
+// "2026-01-14T14:00:00-05:00". Deliberately never ends in "Z": that suffix means UTC, which
+// would misrepresent an Eastern time. Use `webinarDateUtc`/toISOString() for the UTC instant.
+export function formatEasternIso(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const hour = map.hour === "24" ? "00" : map.hour; // some engines emit "24" for midnight
+
+  const offsetPart = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    timeZoneName: "longOffset",
+  })
+    .formatToParts(date)
+    .find((p) => p.type === "timeZoneName");
+  const offset = offsetPart ? offsetPart.value.replace("GMT", "") || "+00:00" : "+00:00";
+
+  return `${map.year}-${map.month}-${map.day}T${hour}:${map.minute}:${map.second}${offset}`;
+}

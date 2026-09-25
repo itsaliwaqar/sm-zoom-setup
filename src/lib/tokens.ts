@@ -8,6 +8,7 @@ export const TOKEN_KEYS = [
   "phone",
   "webinarTopic",
   "webinarDateEastern",
+  "webinarDateEasternIso",
   "webinarDateUtc",
   "joinUrl",
   "shortJoinUrl",
@@ -26,6 +27,7 @@ export type TokenContext = {
   phone?: string | null;
   webinarTopic: string;
   webinarDateEastern: string;
+  webinarDateEasternIso: string;
   webinarDateUtc: string;
   joinUrl: string;
   shortJoinUrl: string;
@@ -43,6 +45,7 @@ export function resolveTokens(ctx: TokenContext): Record<TokenKey, string> {
     phone: ctx.phone ?? "",
     webinarTopic: ctx.webinarTopic,
     webinarDateEastern: ctx.webinarDateEastern,
+    webinarDateEasternIso: ctx.webinarDateEasternIso,
     webinarDateUtc: ctx.webinarDateUtc,
     joinUrl: ctx.joinUrl,
     shortJoinUrl: ctx.shortJoinUrl,

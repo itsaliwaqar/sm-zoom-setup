@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import { resolveEvent } from "../lib/events";
-import { formatEastern } from "../lib/time";
+import { formatEastern, formatEasternIso } from "../lib/time";
 import { hasValidAdminKey } from "../lib/auth";
 import { getBaseUrl } from "../lib/baseUrl";
 import { shortLinkUrl } from "../lib/shortlinks";
@@ -34,6 +34,7 @@ app.get("/", async (c) => {
     topic: event.topic,
     startTimeUtc: event.startTimeUtc.toISOString(),
     startTimeEastern: formatEastern(event.startTimeUtc),
+    startTimeEasternIso: formatEasternIso(event.startTimeUtc),
     seriesId: event.seriesId,
   };
 

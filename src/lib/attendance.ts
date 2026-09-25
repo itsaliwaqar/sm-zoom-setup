@@ -8,7 +8,7 @@ import { tagLead as hyrosTagLead } from "./hyros";
 import { forward as forwardWebhook } from "./outboundWebhook";
 import { withCredentials } from "./credentials";
 import { getSetting } from "./settings";
-import { formatEastern } from "./time";
+import { formatEastern, formatEasternIso } from "./time";
 import { parseJson, resolveTokens, type HyrosConfig, type OutboundWebhookConfig } from "./tokens";
 
 // Sums each attendee's total time present (in seconds) across all of their join/leave sessions.
@@ -95,6 +95,7 @@ export async function processEventAttendance(db: Db, env: Bindings, event: Event
           lastName: registrant.lastName,
           webinarTopic: event.topic,
           webinarDateEastern: formatEastern(event.startTimeUtc),
+          webinarDateEasternIso: formatEasternIso(event.startTimeUtc),
           webinarDateUtc: event.startTimeUtc.toISOString(),
           joinUrl: registrant.joinUrl ?? "",
           shortJoinUrl: "",
