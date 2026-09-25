@@ -106,3 +106,61 @@ export function formatEasternIso(date: Date): string {
 
   return `${map.year}-${map.month}-${map.day}T${hour}:${map.minute}:${map.second}${offset}`;
 }
+
+function easternHms(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const hour = map.hour === "24" ? "00" : map.hour;
+  return `${hour}${map.minute}${map.second}`;
+}
+
+export type EasternEventParts = {
+  dateLabel: string; // "Wednesday, September 23" - no year
+  timeLabel: string; // "2:00 PM EDT" - zone abbreviation follows DST automatically
+  calDate: string; // "20260923"
+  calTime: string; // "140000"
+  calEndTime: string; // "150000" - start + durationMinutes
+};
+
+// Precomputed pieces for embedding on a landing page (e.g. a ClickFunnels header script) -
+// everything is already resolved to Eastern server-side so the embedding page never needs to do
+// its own timezone math (which would otherwise use the *visitor's* local timezone, not Eastern).
+export function formatEasternParts(startUtc: Date, durationMinutes: number): EasternEventParts {
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(startUtc);
+
+  const timeLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(startUtc);
+
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(startUtc);
+  const dMap: Record<string, string> = {};
+  for (const p of dateParts) dMap[p.type] = p.value;
+
+  return {
+    dateLabel,
+    timeLabel,
+    calDate: `${dMap.year}${dMap.month}${dMap.day}`,
+    calTime: easternHms(startUtc),
+    calEndTime: easternHms(new Date(startUtc.getTime() + durationMinutes * 60_000)),
+  };
+}

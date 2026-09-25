@@ -1060,7 +1060,7 @@ const API_ENDPOINTS = [
       { method: "DELETE", path: "/api/zoom-events/:id", auth: "session-or-key", desc: "Remove the event from Zoom (irreversible there) - local record is kept, marked cancelled, so registrant/attendance history and CSV export still work." },
       { method: "POST", path: "/api/zoom-events/:id/sync-attendance", auth: "session-or-key", desc: "Manually (re-)pull the Zoom attendee report and re-sync registrants to GHL/Hyros/webhook." },
       { method: "GET", path: "/api/zoom-events/:id/export.csv", auth: "session-or-key", desc: "Download that event's registrants (with attendance) as CSV." },
-      { method: "GET", path: "/api/upcoming", auth: "public", desc: "Look up the upcoming (or a specific) event's date/time. Query: type, mode, seriesId, zoomEventId. Join links only included with a valid X-API-Key." },
+      { method: "GET", path: "/api/upcoming", auth: "public", desc: "Look up the upcoming (or a specific) event's date/time - includes precomputed dateLabel/timeLabel/calDate/calTime/calEndTime and a public shortJoinUrl for embedding on landing pages. Query: type, mode, seriesId (or seriesSlug), zoomEventId. CORS-enabled and edge-cached (~30s) for fast, high-volume use. Raw joinUrl/zoomId only included with a valid X-API-Key (never cached)." },
     ],
   },
   {
