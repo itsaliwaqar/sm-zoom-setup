@@ -439,8 +439,7 @@ async function tabEvents(section) {
   function openEditPanel(r) {
     editPanelHost.innerHTML = "";
     const editZoomForm = buildZoomSettingsForm(() => r.type, JSON.parse(r.rawResponseJson || "{}"));
-    const originalStart = utcToEasternInput(r.startTimeUtc);
-    const editStartInput = easternDateTimeInput({ required: true, value: originalStart });
+    const editStartInput = easternDateTimeInput({ required: true, value: utcToEasternInput(r.startTimeUtc) });
     const editMsgHost = el("div", {});
     const editForm = el("form", { class: "flex flex-col gap-5" }, [
       el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("Start time (Eastern)", editStartInput)]),
@@ -454,8 +453,9 @@ async function tabEvents(section) {
       e.preventDefault();
       try {
         const zoomPayload = editZoomForm.getPayload();
-        // Only send start_time when it actually changed, so saving other settings never moves the event.
-        if (editStartInput.value !== originalStart) zoomPayload.start_time = easternInputToUtcIso(editStartInput.value);
+        // Always sent (not just when changed) so a save re-syncs Zoom to the time shown here, e.g. if
+        // Zoom's copy drifted from ours.
+        zoomPayload.start_time = easternInputToUtcIso(editStartInput.value);
         await api(`/api/zoom-events/${r.id}`, { method: "PATCH", body: JSON.stringify({ zoomPayload }) });
         banner(msgHost, `Updated "${r.topic}".`, "ok");
         editPanelHost.innerHTML = "";
