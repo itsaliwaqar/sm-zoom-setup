@@ -95,17 +95,30 @@ export type ZoomCreateResult = {
   [key: string]: unknown;
 };
 
+// Zoom only treats start_time as UTC in exactly "yyyy-MM-ddTHH:mm:ssZ" form. With milliseconds
+// (what Date#toISOString() emits, e.g. "...T18:00:00.000Z") it silently ignores the Z and reads the
+// wall-clock value in the payload's `timezone` instead - shifting events by the UTC offset.
+function toZoomStartTime(value: string): string {
+  const date = new Date(value);
+  if (isNaN(date.getTime())) throw new Error(`Invalid start_time: ${value}`);
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function forZoom<T extends Partial<ZoomCreatePayload>>(payload: T): T {
+  return payload.start_time ? { ...payload, start_time: toZoomStartTime(payload.start_time) } : payload;
+}
+
 export async function createMeeting(env: Bindings, hostEmail: string, payload: ZoomCreatePayload) {
   return zoomJson<ZoomCreateResult>(env, `/users/${encodeURIComponent(hostEmail)}/meetings`, {
     method: "POST",
-    body: JSON.stringify({ type: 2, ...payload }), // type 2 = scheduled meeting
+    body: JSON.stringify({ type: 2, ...forZoom(payload) }), // type 2 = scheduled meeting
   });
 }
 
 export async function createWebinar(env: Bindings, hostEmail: string, payload: ZoomCreatePayload) {
   return zoomJson<ZoomCreateResult>(env, `/users/${encodeURIComponent(hostEmail)}/webinars`, {
     method: "POST",
-    body: JSON.stringify({ type: 5, ...payload }), // type 5 = scheduled webinar
+    body: JSON.stringify({ type: 5, ...forZoom(payload) }), // type 5 = scheduled webinar
   });
 }
 
@@ -123,11 +136,11 @@ export async function getWebinar(env: Bindings, webinarId: string | number) {
 
 // Zoom's update endpoint accepts a partial payload and returns 204 No Content on success.
 export async function updateMeeting(env: Bindings, meetingId: string | number, payload: Partial<ZoomCreatePayload>) {
-  return zoomJson<void>(env, `/meetings/${meetingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+  return zoomJson<void>(env, `/meetings/${meetingId}`, { method: "PATCH", body: JSON.stringify(forZoom(payload)) });
 }
 
 export async function updateWebinar(env: Bindings, webinarId: string | number, payload: Partial<ZoomCreatePayload>) {
-  return zoomJson<void>(env, `/webinars/${webinarId}`, { method: "PATCH", body: JSON.stringify(payload) });
+  return zoomJson<void>(env, `/webinars/${webinarId}`, { method: "PATCH", body: JSON.stringify(forZoom(payload)) });
 }
 
 export async function updateZoomEvent(env: Bindings, type: ZoomEventType, zoomEventId: string | number, payload: Partial<ZoomCreatePayload>) {
