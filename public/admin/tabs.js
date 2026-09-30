@@ -43,7 +43,7 @@ async function tabDashboard(section) {
           ? el("div", { class: "flex items-center justify-between flex-wrap gap-3" }, [
               el("div", {}, [
                 el("p", { class: "font-medium text-slate-900 dark:text-white", text: upcoming.topic }),
-                el("p", { class: "text-sm text-slate-500 dark:text-slate-400", text: `${upcoming.type} - ${new Date(upcoming.startTimeUtc).toUTCString()}` }),
+                el("p", { class: "text-sm text-slate-500 dark:text-slate-400", text: `${upcoming.type} - ${formatEastern(upcoming.startTimeUtc)}` }),
               ]),
               badge(upcoming.status, "green"),
             ])
@@ -425,7 +425,7 @@ async function tabEvents(section) {
       field("Type", typeSelect),
       field("Template ID", templateIdInput),
       field("Series ID", input({ name: "seriesId", placeholder: "optional" })),
-      field("Start time (UTC ISO)", input({ name: "startTime", required: true, placeholder: "2026-01-14T19:00:00Z" })),
+      field("Start time (Eastern)", easternDateTimeInput({ name: "startTime", required: true })),
       field("Host email (override)", input({ name: "hostEmail", placeholder: "optional if template supplies it" })),
     ]),
     zoomDetails,
@@ -439,8 +439,11 @@ async function tabEvents(section) {
   function openEditPanel(r) {
     editPanelHost.innerHTML = "";
     const editZoomForm = buildZoomSettingsForm(() => r.type, JSON.parse(r.rawResponseJson || "{}"));
+    const originalStart = utcToEasternInput(r.startTimeUtc);
+    const editStartInput = easternDateTimeInput({ required: true, value: originalStart });
     const editMsgHost = el("div", {});
     const editForm = el("form", { class: "flex flex-col gap-5" }, [
+      el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("Start time (Eastern)", editStartInput)]),
       editZoomForm.container,
       el("div", { class: "flex items-center gap-3" }, [
         btn("Save changes", { type: "submit", icon: "checkCircle" }),
@@ -450,7 +453,10 @@ async function tabEvents(section) {
     editForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
-        await api(`/api/zoom-events/${r.id}`, { method: "PATCH", body: JSON.stringify({ zoomPayload: editZoomForm.getPayload() }) });
+        const zoomPayload = editZoomForm.getPayload();
+        // Only send start_time when it actually changed, so saving other settings never moves the event.
+        if (editStartInput.value !== originalStart) zoomPayload.start_time = easternInputToUtcIso(editStartInput.value);
+        await api(`/api/zoom-events/${r.id}`, { method: "PATCH", body: JSON.stringify({ zoomPayload }) });
         banner(msgHost, `Updated "${r.topic}".`, "ok");
         editPanelHost.innerHTML = "";
         load();
@@ -469,7 +475,7 @@ async function tabEvents(section) {
     tableHost.innerHTML = "";
     tableHost.appendChild(
       table(
-        ["Topic", "Type", "Start (UTC)", "Status", "Attendance", "Links", ""],
+        ["Topic", "Type", "Start (Eastern)", "Status", "Attendance", "Links", ""],
         rows.map((r) => {
           const syncBtn = btn(r.attendanceSyncedAt ? "Re-sync" : "Sync now", {
             variant: "secondary",
@@ -503,7 +509,7 @@ async function tabEvents(section) {
           return [
             td(el("span", { class: "font-medium", text: r.topic })),
             td(badge(r.type, r.type === "webinar" ? "indigo" : "slate")),
-            td(new Date(r.startTimeUtc).toUTCString()),
+            td(formatEastern(r.startTimeUtc)),
             td(badge(r.status, r.status === "scheduled" ? "amber" : r.status === "occurred" ? "green" : "red")),
             td(r.attendanceSyncedAt ? el("span", { class: "text-emerald-600 dark:text-emerald-400 text-xs", text: `synced ${new Date(r.attendanceSyncedAt).toLocaleString()}` }) : el("span", { class: "text-slate-400 text-xs", text: "not yet" })),
             td(r.shortJoinUrl ? el("div", { class: "flex items-center gap-1" }, [codeValue(r.shortJoinUrl), copyButton(r.shortJoinUrl)]) : "-"),
@@ -519,6 +525,7 @@ async function tabEvents(section) {
     try {
       const fd = Object.fromEntries(new FormData(form));
       Object.keys(fd).forEach((k) => { if (!fd[k]) delete fd[k]; });
+      fd.startTime = easternInputToUtcIso(fd.startTime);
       if (!templateIdInput.value || zoomDetails.open) {
         fd.zoomPayload = zoomForm.getPayload();
       }
@@ -553,14 +560,14 @@ async function tabSchedule(section) {
   const recurringFields = el("div", { class: "flex flex-col gap-3 sm:col-span-2" }, [
     field("Days of week", el("div", { class: "flex flex-wrap gap-4" }, dayCheckboxes.map((d) => d.wrap))),
     el("div", { class: "grid sm:grid-cols-3 gap-3" }, [
-      field("Time (HH:MM)", input({ name: "time", value: "14:00" })),
+      field("Time", input({ name: "time", type: "time", value: "14:00" })),
       field("Timezone", input({ name: "tz", value: "America/New_York" })),
       field("Weeks of meetings to keep scheduled", input({ name: "horizonWeeks", type: "number", min: 1, value: 2 })),
     ]),
   ]);
   const onceFields = el("div", { class: "grid sm:grid-cols-2 gap-3 sm:col-span-2 hidden" }, [
-    field("Event start time (UTC ISO)", input({ name: "eventStartTime", placeholder: "2026-02-03T19:00:00Z" })),
-    field("Create at (UTC ISO, optional)", input({ name: "createAt", placeholder: "defaults to now" })),
+    field("Event start time (Eastern)", easternDateTimeInput({ name: "eventStartTime" })),
+    field("Create at (Eastern, optional - defaults to now)", easternDateTimeInput({ name: "createAt" })),
   ]);
   modeSelect.addEventListener("change", () => {
     recurringFields.classList.toggle("hidden", modeSelect.value !== "recurring");
@@ -584,7 +591,7 @@ async function tabSchedule(section) {
   function describeSchedule(r) {
     if (r.mode === "once") {
       const parsed = JSON.parse(r.recurrenceRuleJson || "{}");
-      return parsed.eventStartTimeUtc ? new Date(parsed.eventStartTimeUtc).toUTCString() : "-";
+      return parsed.eventStartTimeUtc ? formatEastern(parsed.eventStartTimeUtc) : "-";
     }
     const parsed = JSON.parse(r.recurrenceRuleJson || "{}");
     const days = (parsed.daysOfWeek || []).map((d) => DAY_LABELS[d]).join("/");
@@ -596,12 +603,12 @@ async function tabSchedule(section) {
     tableHost.innerHTML = "";
     tableHost.appendChild(
       table(
-        ["Mode", "Status", "Schedule", "Last reconciled / Run at (UTC)", "Series", "Error", ""],
+        ["Mode", "Status", "Schedule", "Last reconciled / Run at (Eastern)", "Series", "Error", ""],
         rows.map((r) => [
           td(r.mode),
           td(badge(r.status, r.status === "pending" ? "amber" : r.status === "completed" ? "green" : "red")),
           td(el("span", { class: "text-xs", text: describeSchedule(r) })),
-          td(new Date(r.runAtUtc).toUTCString()),
+          td(formatEastern(r.runAtUtc)),
           td(codeValue(r.seriesId)),
           td(r.lastError ? el("span", { class: "text-red-600 dark:text-red-400 text-xs", text: r.lastError }) : "-"),
           td(
@@ -647,8 +654,9 @@ async function tabSchedule(section) {
         body.recurrenceRule = { daysOfWeek, time: fd.time, tz: fd.tz };
         body.horizonDays = Number(fd.horizonWeeks || 2) * 7;
       } else {
-        body.eventStartTime = fd.eventStartTime;
-        if (fd.createAt) body.createAt = fd.createAt;
+        if (!fd.eventStartTime) throw new Error("Event start time is required");
+        body.eventStartTime = easternInputToUtcIso(fd.eventStartTime);
+        if (fd.createAt) body.createAt = easternInputToUtcIso(fd.createAt);
       }
       await api("/api/zoom/schedule", { method: "POST", body: JSON.stringify(body) });
       banner(msgHost, "Job scheduled.", "ok");

@@ -73,6 +73,51 @@ function field(labelText, inputEl) {
 function input(attrs = {}) {
   return el("input", { class: INPUT, ...attrs });
 }
+/* ---------- Eastern time helpers ---------- */
+// All admin date/time inputs are entered as Eastern wall-clock time regardless of the browser's
+// own timezone, then converted to the UTC instant the API expects (DST-aware per date).
+const EASTERN_TZ = "America/New_York";
+
+function easternParts(date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(date);
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  if (map.hour === "24") map.hour = "00";
+  return map;
+}
+// "2026-01-14T14:00" (Eastern, as produced by <input type="datetime-local">) -> "2026-01-14T19:00:00.000Z"
+function easternInputToUtcIso(value) {
+  if (!value) return "";
+  const guess = new Date(`${value}:00Z`);
+  if (isNaN(guess)) throw new Error(`Invalid date/time: ${value}`);
+  // Two passes so the offset used is the one in effect at the resulting instant (DST boundaries).
+  let result = guess;
+  for (let i = 0; i < 2; i++) {
+    const p = easternParts(result);
+    const offsetMs = result.getTime() - Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+    result = new Date(result.getTime() + (guess.getTime() - (result.getTime() - offsetMs)));
+  }
+  return result.toISOString();
+}
+// UTC instant -> "2026-01-14T14:00" for pre-filling a datetime-local input with Eastern time
+function utcToEasternInput(value) {
+  if (!value) return "";
+  const p = easternParts(new Date(value));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+// UTC instant -> "Wed, Jan 14, 2026, 2:00 PM EST"
+function formatEastern(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: EASTERN_TZ, weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  }).format(new Date(value));
+}
+function easternDateTimeInput(attrs = {}) {
+  return input({ type: "datetime-local", step: 60, ...attrs });
+}
+
 function select(options, attrs = {}) {
   return el(
     "select",

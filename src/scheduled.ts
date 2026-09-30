@@ -68,13 +68,18 @@ export async function reconcileRecurringJob(db: Db, env: Bindings, job: Schedule
     const rule = JSON.parse(job.recurrenceRuleJson ?? "{}") as RecurrenceRule;
     const occurrences = generateOccurrences(rule, now, job.horizonDays);
 
+    // A slot counts as filled if an event currently starts there, or one was created there and
+    // later rescheduled to a different time (originalStartTimeUtc, set by PATCH /api/zoom-events).
+    const seriesEvents = await db.select().from(schema.zoomEvents).where(eq(schema.zoomEvents.seriesId, job.seriesId)).all();
+    const filledSlots = new Set<number>();
+    for (const e of seriesEvents) {
+      filledSlots.add(e.startTimeUtc.getTime());
+      const original = e.rawResponseJson ? (JSON.parse(e.rawResponseJson) as { originalStartTimeUtc?: string }).originalStartTimeUtc : undefined;
+      if (original) filledSlots.add(new Date(original).getTime());
+    }
+
     for (const occurrence of occurrences) {
-      const existing = await db
-        .select()
-        .from(schema.zoomEvents)
-        .where(and(eq(schema.zoomEvents.seriesId, job.seriesId), eq(schema.zoomEvents.startTimeUtc, occurrence)))
-        .get();
-      if (existing) continue;
+      if (filledSlots.has(occurrence.getTime())) continue;
 
       const payload: ZoomCreatePayload = {
         ...(JSON.parse(template.zoomPayloadJson) as ZoomCreatePayload),

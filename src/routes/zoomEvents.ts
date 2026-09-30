@@ -46,11 +46,16 @@ app.patch("/:id", async (c) => {
 
   const priorRaw = event.rawResponseJson ? (JSON.parse(event.rawResponseJson) as Record<string, unknown>) : {};
   const priorSettings = (priorRaw.settings as Record<string, unknown>) ?? {};
-  const mergedRaw = {
+  const mergedRaw: Record<string, unknown> = {
     ...priorRaw,
     ...body.zoomPayload,
     settings: { ...priorSettings, ...(body.zoomPayload.settings ?? {}) },
   };
+  // Remember the slot the event was originally created for, so a recurring job doesn't see that
+  // slot as empty after a reschedule and create a duplicate there (see reconcileRecurringJob).
+  if (body.zoomPayload.start_time && !priorRaw.originalStartTimeUtc) {
+    mergedRaw.originalStartTimeUtc = event.startTimeUtc.toISOString();
+  }
 
   const update: Record<string, unknown> = { rawResponseJson: JSON.stringify(mergedRaw) };
   if (body.zoomPayload.topic) update.topic = body.zoomPayload.topic;
