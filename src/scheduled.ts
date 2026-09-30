@@ -5,6 +5,7 @@ import type { Bindings } from "./env";
 import { generateOccurrences, type RecurrenceRule } from "./lib/time";
 import { createAndStoreZoomEvent } from "./lib/eventCreation";
 import { processEventAttendance } from "./lib/attendance";
+import { processDueAttendeeFlows } from "./lib/attendeeFlows";
 import { getSetting } from "./lib/settings";
 import type { ZoomCreatePayload } from "./lib/zoom";
 
@@ -119,14 +120,25 @@ export async function processDueJobs(env: Bindings): Promise<void> {
   for (const job of recurringJobs) await reconcileRecurringJob(db, env, job);
 }
 
+async function attendanceBufferMinutes(db: Db): Promise<number> {
+  const raw = await getSetting(db, "attendance_sync_buffer_minutes");
+  return raw ? Number(raw) : DEFAULT_ATTENDANCE_SYNC_BUFFER_MINUTES;
+}
+
+// Runs user-built attendee flows (Attendee Flows tab) for events that have ended - same buffer
+// as attendance sync, so Zoom's attendee report has had time to generate.
+export async function processAttendeeFlows(env: Bindings): Promise<void> {
+  const db = getDb(env.DB);
+  await processDueAttendeeFlows(db, env, await attendanceBufferMinutes(db));
+}
+
 // Finds events whose end time (start + duration + buffer) has passed but whose attendee report
 // hasn't been pulled yet, fetches it from Zoom, and syncs registrants to GHL/Hyros/webhook.
 export async function processAttendanceSync(env: Bindings): Promise<void> {
   const db = getDb(env.DB);
   const now = new Date();
 
-  const bufferMinutesRaw = await getSetting(db, "attendance_sync_buffer_minutes");
-  const bufferMinutes = bufferMinutesRaw ? Number(bufferMinutesRaw) : DEFAULT_ATTENDANCE_SYNC_BUFFER_MINUTES;
+  const bufferMinutes = await attendanceBufferMinutes(db);
 
   const candidates = await db
     .select()

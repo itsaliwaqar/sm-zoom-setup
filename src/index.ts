@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppEnv, Bindings } from "./env";
-import { processDueJobs, processAttendanceSync } from "./scheduled";
+import { processDueJobs, processAttendanceSync, processAttendeeFlows } from "./scheduled";
 import { refreshAccessToken } from "./lib/zoom";
 import { getDb } from "./db/client";
 import { withCredentials } from "./lib/credentials";
@@ -19,6 +19,7 @@ import registerWebhook from "./routes/registerWebhook";
 import ghlFields from "./routes/ghlFields";
 import shortLinksAdmin from "./routes/shortLinksAdmin";
 import shortLinkRedirect from "./routes/shortLinkRedirect";
+import attendeeFlows from "./routes/attendeeFlows";
 
 const app = new Hono<AppEnv>();
 
@@ -41,6 +42,7 @@ app.route("/api/zoom-events", zoomEvents);
 app.route("/api/registration-routes", registrationRoutes);
 app.route("/api/short-links", shortLinksAdmin);
 app.route("/api/ghl/custom-fields", ghlFields);
+app.route("/api/attendee-flows", attendeeFlows);
 
 // Public: date/time lookup (join links only included when a valid X-API-Key is sent)
 app.route("/api/upcoming", upcoming);
@@ -66,8 +68,12 @@ app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 export default {
   fetch: app.fetch,
   async scheduled(event: ScheduledEvent, env: Bindings, ctx: ExecutionContext) {
+    // Attendee flows ride on the light token-refresh trigger (not the */15 one) so a large flow
+    // doesn't share its subrequest budget with job reconciliation + attendance sync. Not a
+    // trigger of their own because the Workers Free plan caps cron triggers per account.
     if (event.cron === "*/30 * * * *") {
       ctx.waitUntil(withCredentials(getDb(env.DB), env).then(refreshAccessToken));
+      ctx.waitUntil(processAttendeeFlows(env));
       return;
     }
     ctx.waitUntil(processDueJobs(env));

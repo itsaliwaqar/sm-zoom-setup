@@ -32,16 +32,26 @@ export async function noShowTag(db: Db, env: Bindings): Promise<string> {
   return (await getSetting(db, "ghl_no_show_tag")) || env.GHL_NO_SHOW_TAG || "Webinar No-Show";
 }
 
+const GHL_MAX_RETRIES = 3;
+
+// Retries on 429 (GHL allows ~100 requests / 10s per location), which bulk jobs like attendee
+// flows can hit - waits for Retry-After when GHL sends one, otherwise backs off 2s, 4s, 8s.
 async function ghlFetch(env: Bindings, path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(`${GHL_API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env.GHL_PRIVATE_TOKEN}`,
-      Version: GHL_API_VERSION,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${GHL_API_BASE}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${env.GHL_PRIVATE_TOKEN}`,
+        Version: GHL_API_VERSION,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    });
+    if (res.status !== 429 || attempt >= GHL_MAX_RETRIES) return res;
+    const retryAfterSeconds = Number(res.headers.get("Retry-After"));
+    const waitMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 2000 * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
 }
 
 async function ghlJson<T>(env: Bindings, path: string, init: RequestInit = {}): Promise<T> {

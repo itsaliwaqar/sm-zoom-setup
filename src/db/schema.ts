@@ -141,3 +141,33 @@ export const settings = sqliteTable("settings", {
   value: text("value").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
 });
+
+// A user-built post-event automation: after an event ends, pull its Zoom attendee report, group
+// the join/leave rows per person, and run each configured action (GHL tag + workflow, Hyros tag,
+// Google Sheets rows, outbound webhook) for the attendees. See src/lib/attendeeFlows.ts.
+export const attendeeFlows = sqliteTable("attendee_flows", {
+  id: id(),
+  name: text("name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  seriesId: text("series_id").references(() => series.id), // null = applies to every event
+  autoRun: integer("auto_run", { mode: "boolean" }).notNull().default(true), // run automatically once the event ends
+  minMinutes: integer("min_minutes").notNull().default(0), // only attendees present at least this long
+  excludeEmailsJson: text("exclude_emails_json"), // string[] - e.g. host/panelist emails to skip
+  actionsJson: text("actions_json").notNull(), // FlowAction[]
+  createdAt: createdAt(),
+});
+
+// One execution of a flow against one event - also the dedupe record that stops the auto trigger
+// from running the same flow twice for the same event.
+export const attendeeFlowRuns = sqliteTable("attendee_flow_runs", {
+  id: id(),
+  flowId: text("flow_id").notNull().references(() => attendeeFlows.id),
+  zoomEventId: text("zoom_event_id").notNull().references(() => zoomEvents.id),
+  trigger: text("trigger", { enum: ["auto", "manual"] }).notNull(),
+  status: text("status", { enum: ["running", "succeeded", "partial", "failed"] }).notNull().default("running"),
+  attendeeCount: integer("attendee_count"),
+  summaryJson: text("summary_json"), // ActionSummary[]
+  error: text("error"),
+  startedAt: integer("started_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  finishedAt: integer("finished_at", { mode: "timestamp" }),
+});

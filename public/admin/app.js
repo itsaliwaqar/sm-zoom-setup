@@ -315,6 +315,7 @@ const NAV = [
   { id: "events", label: "Zoom Events", icon: "video" },
   { id: "schedule", label: "Scheduled Jobs", icon: "clock" },
   { id: "routes", label: "Registration Routes", icon: "route" },
+  { id: "flows", label: "Attendee Flows", icon: "checkCircle" },
   { id: "registrants", label: "Registrants", icon: "users" },
   { id: "links", label: "Short Links", icon: "link" },
   { id: "docs", label: "API Docs", icon: "list" },

@@ -198,9 +198,10 @@ export async function addZoomRegistrant(
     : addMeetingRegistrant(env, zoomEventId, registrant);
 }
 
-type ZoomParticipant = {
+export type ZoomParticipant = {
   user_email?: string;
   name: string;
+  registrant_id?: string;
   join_time: string;
   leave_time: string;
   duration: number; // seconds, for this join/leave session

@@ -92,6 +92,15 @@ export async function appendRow(
   env: Bindings,
   opts: { spreadsheetId: string; sheetName: string; values: string[] }
 ): Promise<void> {
+  return appendRows(env, { spreadsheetId: opts.spreadsheetId, sheetName: opts.sheetName, rows: [opts.values] });
+}
+
+// Appends many rows in a single Sheets API call (e.g. one row per webinar attendee).
+export async function appendRows(
+  env: Bindings,
+  opts: { spreadsheetId: string; sheetName: string; rows: string[][] }
+): Promise<void> {
+  if (opts.rows.length === 0) return;
   const token = await getAccessToken(env);
   const range = encodeURIComponent(`${opts.sheetName}!A1`);
   const res = await fetch(
@@ -99,7 +108,7 @@ export async function appendRow(
     {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ values: [opts.values] }),
+      body: JSON.stringify({ values: opts.rows }),
     }
   );
   if (!res.ok) {
