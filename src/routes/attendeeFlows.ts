@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
@@ -115,20 +115,39 @@ app.delete("/:id", async (c) => {
 });
 
 // Resume a partial/failed run: re-runs the same flow+event but skips attendees who already
-// succeeded in each action (tracked in the prior run's summaryJson.succeededEmails).
-// For runs created before this feature was added, succeededEmails will be empty and the
-// entire attendee list will be re-processed (same as a fresh run).
+// succeeded in each action across ALL prior runs for this (flow, event) pair — not just the
+// immediate parent — so successive resumes correctly accumulate the skip list rather than
+// replaying already-processed batches.
 app.post("/runs/:runId/resume", async (c) => {
   const db = getDb(c.env.DB);
   const priorRun = await db.select().from(schema.attendeeFlowRuns).where(eq(schema.attendeeFlowRuns.id, c.req.param("runId"))).get();
   if (!priorRun) return c.json({ error: "run not found" }, 404);
-  const [flow, event] = await Promise.all([
+  const [flow, event, allRuns] = await Promise.all([
     db.select().from(schema.attendeeFlows).where(eq(schema.attendeeFlows.id, priorRun.flowId)).get(),
     db.select().from(schema.zoomEvents).where(eq(schema.zoomEvents.id, priorRun.zoomEventId)).get(),
+    db.select({ summaryJson: schema.attendeeFlowRuns.summaryJson })
+      .from(schema.attendeeFlowRuns)
+      .where(and(
+        eq(schema.attendeeFlowRuns.flowId, priorRun.flowId),
+        eq(schema.attendeeFlowRuns.zoomEventId, priorRun.zoomEventId),
+      )).all(),
   ]);
   if (!flow) return c.json({ error: "flow not found" }, 404);
   if (!event) return c.json({ error: "event not found" }, 404);
-  const priorSummaries = parseJson<ActionSummary[]>(priorRun.summaryJson) ?? [];
+
+  // Merge succeeded emails from every run for this (flow, event) pair, per action type.
+  const cumulativeByType = new Map<string, Set<string>>();
+  for (const run of allRuns) {
+    for (const s of parseJson<ActionSummary[]>(run.summaryJson) ?? []) {
+      if (!cumulativeByType.has(s.type)) cumulativeByType.set(s.type, new Set());
+      for (const email of s.succeededEmails ?? []) cumulativeByType.get(s.type)!.add(email);
+    }
+  }
+  const priorSummaries: ActionSummary[] = [...cumulativeByType.entries()].map(([type, emails]) => ({
+    type: type as ActionSummary["type"],
+    succeeded: emails.size, failed: 0, skipped: 0, errors: [], succeededEmails: [...emails],
+  }));
+
   return c.json(await runFlow(db, c.env, flow, event, "manual", { priorSummaries }));
 });
 
