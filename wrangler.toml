@@ -14,9 +14,6 @@ run_worker_first = true
 
 # Two schedules: every 15 min runs due-job creation + attendance sync; every 30 min proactively
 # refreshes the Zoom access token (it expires hourly) - see scheduled() in src/index.ts.
-[limits]
-subrequests = 1000
-
 [triggers]
 crons = ["*/15 * * * *", "*/30 * * * *"]
 
