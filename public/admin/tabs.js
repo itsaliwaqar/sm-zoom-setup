@@ -436,8 +436,12 @@ async function tabEvents(section) {
   const editPanelHost = el("div", {});
   section.appendChild(editPanelHost);
 
+  const runFlowPanelHost = el("div", {});
+  section.appendChild(runFlowPanelHost);
+
   function openEditPanel(r) {
     editPanelHost.innerHTML = "";
+    runFlowPanelHost.innerHTML = "";
     const editZoomForm = buildZoomSettingsForm(() => r.type, JSON.parse(r.rawResponseJson || "{}"));
     const editStartInput = easternDateTimeInput({ required: true, value: utcToEasternInput(r.startTimeUtc) });
     const editMsgHost = el("div", {});
@@ -467,6 +471,89 @@ async function tabEvents(section) {
     editPanelHost.appendChild(card([el("div", { class: "p-5" }, [el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3", text: `Editing "${r.topic}"` }), editMsgHost, editForm])], "mb-6"));
   }
 
+  function openRunFlowPanel(r) {
+    editPanelHost.innerHTML = "";
+    runFlowPanelHost.innerHTML = "";
+    const panelMsgHost = el("div", {});
+    const previewHost = el("div", {});
+    const flowSelect = select([{ value: "", label: "Loading…" }], {});
+
+    api("/api/attendee-flows").then((flows) => {
+      flowSelect.innerHTML = "";
+      const applicable = flows.filter((f) => !f.seriesId || f.seriesId === r.seriesId);
+      if (!applicable.length) {
+        flowSelect.appendChild(el("option", { value: "", text: "No applicable flows — create one in the Flows tab" }));
+        return;
+      }
+      for (const f of applicable) {
+        flowSelect.appendChild(el("option", { value: f.id, text: f.name + (f.enabled ? "" : " (disabled)") }));
+      }
+    }).catch((err) => banner(panelMsgHost, err.message, "err"));
+
+    const previewBtn = btn("Preview attendees", {
+      variant: "secondary",
+      icon: "eye",
+      onClick: async () => {
+        if (!flowSelect.value) return;
+        previewBtn.disabled = true;
+        previewHost.innerHTML = "";
+        try {
+          const data = await api(`/api/attendee-flows/attendees/${r.id}?flowId=${encodeURIComponent(flowSelect.value)}`);
+          previewHost.appendChild(el("p", { class: "text-sm text-slate-500 dark:text-slate-400 my-3", text: `${data.attendeeCount} attendee(s) after this flow's filters. Nothing was sent.` }));
+          previewHost.appendChild(
+            table(
+              ["Email", "Name", "Joins", "First join (ET)", "Last leave (ET)", "Minutes"],
+              data.attendees.map((a) => [
+                td(a.email || el("span", { class: "text-slate-400", text: "(no email)" })),
+                td(a.name),
+                td(String(a.joinCount)),
+                td(formatEastern(a.firstJoinTime)),
+                td(formatEastern(a.lastLeaveTime)),
+                td(String(a.attendedMinutes)),
+              ])
+            )
+          );
+        } catch (err) {
+          banner(panelMsgHost, err.message, "err");
+        } finally {
+          previewBtn.disabled = false;
+        }
+      },
+    });
+
+    const runNowBtn = btn("Run now", {
+      icon: "play",
+      onClick: async () => {
+        if (!flowSelect.value) return;
+        const flowName = flowSelect.selectedOptions[0]?.textContent;
+        if (!confirm(`Run "${flowName}" for "${r.topic}"? This sends attendees to every action in the flow, even if it already ran for this event.`)) return;
+        runNowBtn.disabled = true;
+        try {
+          const run = await api(`/api/attendee-flows/${flowSelect.value}/run`, { method: "POST", body: JSON.stringify({ zoomEventId: r.id }) });
+          banner(panelMsgHost, `Run ${run.status}: ${run.attendeeCount ?? 0} attendee(s).${run.error ? " " + run.error : ""}`, run.status === "succeeded" ? "ok" : "err");
+        } catch (err) {
+          banner(panelMsgHost, err.message, "err");
+        } finally {
+          runNowBtn.disabled = false;
+        }
+      },
+    });
+
+    runFlowPanelHost.appendChild(
+      card([el("div", { class: "p-5" }, [
+        el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3", text: `Run flow for "${r.topic}"` }),
+        panelMsgHost,
+        el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("Flow", flowSelect)]),
+        el("div", { class: "flex items-center gap-3 mt-3" }, [
+          previewBtn,
+          runNowBtn,
+          el("button", { type: "button", class: "text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline", onclick: () => (runFlowPanelHost.innerHTML = "") }, "Cancel"),
+        ]),
+        previewHost,
+      ])], "mb-6")
+    );
+  }
+
   const tableHost = el("div", {});
   section.appendChild(card([tableHost]));
 
@@ -493,6 +580,7 @@ async function tabEvents(section) {
           });
           const exportLink = el("a", { href: `/api/zoom-events/${r.id}/export.csv`, class: "inline-flex items-center justify-center rounded-lg p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition", title: "Export registrants CSV", html: icon("download", "w-4 h-4") });
           const editBtn = iconBtn("edit", { title: "Edit", onClick: () => openEditPanel(r) });
+          const runFlowBtn = iconBtn("play", { title: "Run flow for attendees", onClick: () => openRunFlowPanel(r) });
           const deleteBtn = iconBtn("trash", {
             title: "Delete (removes from Zoom too)",
             onClick: async () => {
@@ -513,7 +601,7 @@ async function tabEvents(section) {
             td(badge(r.status, r.status === "scheduled" ? "amber" : r.status === "occurred" ? "green" : "red")),
             td(r.attendanceSyncedAt ? el("span", { class: "text-emerald-600 dark:text-emerald-400 text-xs", text: `synced ${new Date(r.attendanceSyncedAt).toLocaleString()}` }) : el("span", { class: "text-slate-400 text-xs", text: "not yet" })),
             td(r.shortJoinUrl ? el("div", { class: "flex items-center gap-1" }, [codeValue(r.shortJoinUrl), copyButton(r.shortJoinUrl)]) : "-"),
-            td(el("div", { class: "flex items-center gap-1" }, [syncBtn, editBtn, exportLink, deleteBtn])),
+            td(el("div", { class: "flex items-center gap-1" }, [syncBtn, editBtn, runFlowBtn, exportLink, deleteBtn])),
           ];
         })
       )
@@ -1464,7 +1552,7 @@ const ATTENDEE_TOKEN_OPTIONS = [
   { value: "webinarDateEastern", label: "Webinar date (Eastern)" },
   { value: "webinarDateUtc", label: "Webinar date (UTC)" },
 ];
-const ACTION_LABELS = { ghl: "GHL", hyros: "Hyros", sheets: "Sheets", webhook: "Webhook" };
+const ACTION_LABELS = { ghl: "GHL", hyros: "Hyros", sheets: "Sheets", webhook: "Webhook", ghl_custom_field: "GHL Custom Fields" };
 
 function checkboxEl(checked = false) {
   const cb = el("input", { type: "checkbox", class: "rounded border-slate-300 dark:border-slate-600" });
@@ -1483,6 +1571,48 @@ function actionSection(title, enabledCb, enabledText, body) {
   return details;
 }
 
+// Searchable GHL custom field picker. allFields = [{ id, name }] loaded once per tab open.
+function buildGhlFieldPicker(initial, allFields) {
+  let selectedId = initial.fieldId || "";
+  let selectedName = initial.fieldName || "";
+
+  const searchInput = input({ placeholder: "Search GHL fields…", value: selectedName });
+  const listEl = el("ul", { class: "absolute left-0 right-0 top-full z-20 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg max-h-48 overflow-y-auto hidden" });
+
+  function renderList(query) {
+    listEl.innerHTML = "";
+    const q = query.trim().toLowerCase();
+    const matches = allFields.filter((f) => !q || f.name.toLowerCase().includes(q)).slice(0, 30);
+    if (!matches.length) {
+      listEl.appendChild(el("li", { class: "px-3 py-2 text-sm text-slate-400", text: allFields.length ? "No fields match" : "GHL fields not loaded — check Settings > Credentials" }));
+    } else {
+      for (const f of matches) {
+        const item = el("li", { class: "px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer", text: f.name });
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          selectedId = f.id;
+          selectedName = f.name;
+          searchInput.value = f.name;
+          listEl.classList.add("hidden");
+        });
+        listEl.appendChild(item);
+      }
+    }
+    listEl.classList.remove("hidden");
+  }
+
+  searchInput.addEventListener("input", () => { selectedId = ""; selectedName = ""; renderList(searchInput.value); });
+  searchInput.addEventListener("focus", () => renderList(searchInput.value));
+  searchInput.addEventListener("blur", () => {
+    setTimeout(() => { listEl.classList.add("hidden"); searchInput.value = selectedName; }, 150);
+  });
+
+  return {
+    container: el("div", { class: "relative flex-1 min-w-0" }, [searchInput, listEl]),
+    getValue: () => ({ fieldId: selectedId, fieldName: selectedName }),
+  };
+}
+
 async function tabFlows(section) {
   section.appendChild(pageHeader("Attendee Flows", "After a webinar ends, pull its attendees from Zoom (one row per person - rejoins grouped by email) and send them to GHL, Hyros, Google Sheets or a webhook."));
 
@@ -1491,6 +1621,9 @@ async function tabFlows(section) {
 
   const [seriesRows, eventRows] = await Promise.all([api("/api/series"), api("/api/zoom-events")]);
   const seriesName = Object.fromEntries(seriesRows.map((s) => [s.id, s.name]));
+
+  let ghlCustomFields = [];
+  try { ghlCustomFields = await api("/api/ghl/custom-fields"); } catch { /* GHL not configured yet */ }
 
   // --- flow settings ---
   let editingId = null;
@@ -1565,6 +1698,20 @@ async function tabFlows(section) {
     el("details", {}, [el("summary", { class: "text-xs text-slate-500 cursor-pointer", text: "Example payload" }), payloadExample]),
   ]);
 
+  const ghlCfCb = checkboxEl();
+  const ghlCfLocationInput = input({ placeholder: "optional - defaults to Settings" });
+  const ghlCfMapper = buildMappingList(
+    (initial = {}) => buildGhlFieldPicker(initial, ghlCustomFields),
+    [],
+    "Add field",
+    ATTENDEE_TOKEN_OPTIONS
+  );
+  const ghlCfSection = actionSection("GHL - update custom fields", ghlCfCb, "Upsert each attendee as a GHL contact and write values into the selected custom fields", [
+    field("Location ID", ghlCfLocationInput),
+    field("Field mappings", ghlCfMapper.container),
+    el("p", { class: "text-xs text-slate-400", text: "Each field value can be a computed token from Zoom (e.g. minutes attended, first join time) or a hardcoded static value. Attendees without an email are skipped." }),
+  ]);
+
   const submitBtn = btn("Create flow", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" });
   const cancelLink = el("button", { type: "button", class: "text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline hidden", text: "Cancel edit" });
 
@@ -1581,6 +1728,7 @@ async function tabFlows(section) {
     hyrosSection,
     sheetsSection,
     webhookSection,
+    ghlCfSection,
     el("div", { class: "flex items-center gap-4" }, [submitBtn, cancelLink]),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
@@ -1591,6 +1739,7 @@ async function tabFlows(section) {
     if (hyrosCb.checked) actions.push({ type: "hyros", tags: parseTags(hyrosTagsEl), source: hyrosSourceInput.value.trim() || undefined });
     if (sheetsCb.checked) actions.push({ type: "sheets", spreadsheetId: sheetsIdInput.value.trim(), sheetName: sheetsNameInput.value.trim(), columns: sheetsMapper.getRows().filter((r) => r.header) });
     if (webhookCb.checked) actions.push({ type: "webhook", url: webhookUrlInput.value.trim(), mode: webhookModeSelect.value });
+    if (ghlCfCb.checked) actions.push({ type: "ghl_custom_field", locationId: ghlCfLocationInput.value.trim() || undefined, fields: ghlCfMapper.getRows().filter((r) => r.fieldId) });
     return actions;
   }
 
@@ -1599,7 +1748,8 @@ async function tabFlows(section) {
     form.reset();
     enabledCb.checked = true;
     autoRunCb.checked = true;
-    for (const cb of [ghlCb, hyrosCb, sheetsCb, webhookCb]) cb.checked = false;
+    for (const cb of [ghlCb, hyrosCb, sheetsCb, webhookCb, ghlCfCb]) cb.checked = false;
+    ghlCfMapper.setRows([]);
     sheetsMapper.setRows(defaultColumns);
     renderPayloadExample();
     submitBtn.querySelector("span").textContent = "Create flow";
@@ -1621,6 +1771,7 @@ async function tabFlows(section) {
       if (a.type === "hyros") { hyrosCb.checked = true; hyrosTagsEl.value = (a.tags || []).join(", "); hyrosSourceInput.value = a.source || ""; hyrosSection.open = true; }
       if (a.type === "sheets") { sheetsCb.checked = true; sheetsIdInput.value = a.spreadsheetId || ""; sheetsNameInput.value = a.sheetName || ""; sheetsMapper.setRows(a.columns || []); sheetsSection.open = true; }
       if (a.type === "webhook") { webhookCb.checked = true; webhookUrlInput.value = a.url || ""; webhookModeSelect.value = a.mode || "bulk"; webhookSection.open = true; }
+      if (a.type === "ghl_custom_field") { ghlCfCb.checked = true; ghlCfLocationInput.value = a.locationId || ""; ghlCfMapper.setRows(a.fields || []); ghlCfSection.open = true; }
     }
     renderPayloadExample();
     submitBtn.querySelector("span").textContent = "Update flow";

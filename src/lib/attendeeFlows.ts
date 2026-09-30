@@ -141,7 +141,8 @@ export type FlowAction =
   | { type: "ghl"; locationId?: string; tags: string[]; workflowId?: string }
   | { type: "hyros"; tags: string[]; source?: string }
   | { type: "sheets"; spreadsheetId: string; sheetName: string; columns: (AttendeeMapping & { header: string })[] }
-  | { type: "webhook"; url: string; mode: "bulk" | "individual" };
+  | { type: "webhook"; url: string; mode: "bulk" | "individual" }
+  | { type: "ghl_custom_field"; locationId?: string; fields: (AttendeeMapping & { fieldId: string; fieldName: string })[] };
 
 export type ActionSummary = {
   type: FlowAction["type"];
@@ -267,6 +268,26 @@ async function runAction(env: Bindings, flow: FlowRow, event: EventRow, action: 
         } else {
           await perAttendee(summary, attendees, (a) => forwardWebhook(action.url, { event: "attendee.processed", flow: flowInfo, webinar: webinarInfo(event), attendee: a }));
         }
+        break;
+      }
+      case "ghl_custom_field": {
+        const locationId = action.locationId || env.GHL_DEFAULT_LOCATION_ID;
+        if (!locationId) throw new Error("No GHL location ID (set one on the action or in Settings > Credentials)");
+        if (!action.fields?.length) throw new Error("No field mappings configured");
+        await perAttendee(
+          summary,
+          attendees,
+          async (a) => {
+            const tokens = attendeeTokens(a, event);
+            const customFields = action.fields
+              .filter((f) => f.fieldId)
+              .map((f) => ({ id: f.fieldId, value: renderAttendeeMapping(f, tokens) }));
+            if (!customFields.length) return;
+            const names = a.namesFromRegistration ? { firstName: a.firstName || undefined, lastName: a.lastName || undefined } : {};
+            await upsertContact(env, { locationId, email: a.email, ...names, customFields });
+          },
+          { requireEmail: true }
+        );
         break;
       }
     }
