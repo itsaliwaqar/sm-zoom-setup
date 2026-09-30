@@ -4,7 +4,8 @@ import type { AppEnv } from "../env";
 import { getDb } from "../db/client";
 import * as schema from "../db/schema";
 import { requireAuth } from "../lib/auth";
-import { filterAttendees, getGroupedAttendees, runFlow, type FlowAction } from "../lib/attendeeFlows";
+import { filterAttendees, getGroupedAttendees, runFlow, type ActionSummary, type FlowAction } from "../lib/attendeeFlows";
+import { parseJson } from "../lib/tokens";
 
 const app = new Hono<AppEnv>();
 app.use("*", requireAuth);
@@ -111,6 +112,24 @@ app.delete("/:id", async (c) => {
   await db.delete(schema.attendeeFlowRuns).where(eq(schema.attendeeFlowRuns.flowId, c.req.param("id")));
   await db.delete(schema.attendeeFlows).where(eq(schema.attendeeFlows.id, c.req.param("id")));
   return c.json({ ok: true });
+});
+
+// Resume a partial/failed run: re-runs the same flow+event but skips attendees who already
+// succeeded in each action (tracked in the prior run's summaryJson.succeededEmails).
+// For runs created before this feature was added, succeededEmails will be empty and the
+// entire attendee list will be re-processed (same as a fresh run).
+app.post("/runs/:runId/resume", async (c) => {
+  const db = getDb(c.env.DB);
+  const priorRun = await db.select().from(schema.attendeeFlowRuns).where(eq(schema.attendeeFlowRuns.id, c.req.param("runId"))).get();
+  if (!priorRun) return c.json({ error: "run not found" }, 404);
+  const [flow, event] = await Promise.all([
+    db.select().from(schema.attendeeFlows).where(eq(schema.attendeeFlows.id, priorRun.flowId)).get(),
+    db.select().from(schema.zoomEvents).where(eq(schema.zoomEvents.id, priorRun.zoomEventId)).get(),
+  ]);
+  if (!flow) return c.json({ error: "flow not found" }, 404);
+  if (!event) return c.json({ error: "event not found" }, 404);
+  const priorSummaries = parseJson<ActionSummary[]>(priorRun.summaryJson) ?? [];
+  return c.json(await runFlow(db, c.env, flow, event, "manual", { priorSummaries }));
 });
 
 // Manually run a flow against any (past) event - works even if the flow is disabled or already

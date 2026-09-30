@@ -1910,8 +1910,9 @@ async function tabFlows(section) {
   ])], "mb-6"));
 
   // --- run history ---
+  const runsMsgHost = el("div", { class: "px-5 pt-3" });
   const runsHost = el("div", {});
-  section.appendChild(card([el("div", { class: "px-5 pt-4 pb-1" }, el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300", text: "Run history" })), runsHost]));
+  section.appendChild(card([el("div", { class: "px-5 pt-4 pb-1" }, el("h2", { class: "text-sm font-semibold text-slate-700 dark:text-slate-300", text: "Run history" })), runsMsgHost, runsHost]));
 
   function describeSummary(s) {
     const parts = [`${s.succeeded} ok`];
@@ -1930,16 +1931,43 @@ async function tabFlows(section) {
     runsHost.innerHTML = "";
     runsHost.appendChild(
       table(
-        ["Started (ET)", "Flow", "Event", "Trigger", "Status", "Attendees", "Results"],
-        runs.map((r) => [
-          td(formatEastern(r.startedAt)),
-          td(r.flowName),
-          td(r.event ? `${r.event.topic} - ${formatEastern(r.event.startTimeUtc)}` : "-"),
-          td(r.trigger),
-          td(badge(r.status, r.status === "succeeded" ? "green" : r.status === "running" ? "amber" : "red")),
-          td(r.attendeeCount != null ? String(r.attendeeCount) : "-"),
-          td(r.error ? el("span", { class: "text-xs text-red-600 dark:text-red-400", text: r.error }) : el("div", { class: "flex flex-col gap-0.5" }, JSON.parse(r.summaryJson || "[]").map(describeSummary))),
-        ])
+        ["Started (ET)", "Flow", "Event", "Trigger", "Status", "Attendees", "Results", ""],
+        runs.map((r) => {
+          const canResume = r.status === "partial" || r.status === "failed";
+          const summaries = JSON.parse(r.summaryJson || "[]");
+          const hasTracking = summaries.some((s) => s.succeededEmails?.length > 0);
+          const resumeCell = canResume
+            ? td(btn("Resume", {
+                variant: "secondary",
+                icon: "play",
+                onClick: async (e) => {
+                  e.target.closest("button").disabled = true;
+                  const note = hasTracking
+                    ? `Resume run for "${r.event?.topic}"? Only attendees who didn't succeed last time will be re-processed.`
+                    : `Resume run for "${r.event?.topic}"?\n\nThis run has no per-attendee success data (it predates resume tracking), so ALL attendees will be re-processed. GHL upsert and tags are safe to repeat; workflow enrollment will re-trigger for anyone already enrolled.`;
+                  if (!confirm(note)) { e.target.closest("button").disabled = false; return; }
+                  try {
+                    const run = await api(`/api/attendee-flows/runs/${r.id}/resume`, { method: "POST" });
+                    banner(runsMsgHost, `Resume ${run.status}: ${run.attendeeCount ?? 0} attendee(s) processed.${run.error ? " " + run.error : ""}`, run.status === "succeeded" ? "ok" : "err");
+                    loadRuns();
+                  } catch (err) {
+                    banner(runsMsgHost, err.message, "err");
+                    e.target.closest("button").disabled = false;
+                  }
+                },
+              }))
+            : td("");
+          return [
+            td(formatEastern(r.startedAt)),
+            td(r.flowName),
+            td(r.event ? `${r.event.topic} - ${formatEastern(r.event.startTimeUtc)}` : "-"),
+            td(r.trigger),
+            td(badge(r.status, r.status === "succeeded" ? "green" : r.status === "running" ? "amber" : "red")),
+            td(r.attendeeCount != null ? String(r.attendeeCount) : "-"),
+            td(r.error ? el("span", { class: "text-xs text-red-600 dark:text-red-400", text: r.error }) : el("div", { class: "flex flex-col gap-0.5" }, summaries.map(describeSummary))),
+            resumeCell,
+          ];
+        })
       )
     );
   }

@@ -149,6 +149,7 @@ export type ActionSummary = {
   failed: number;
   skipped: number; // e.g. attendees with no email, for GHL/Hyros
   errors: string[]; // first few failures, for display
+  succeededEmails: string[]; // full list — used to skip already-done attendees on resume
 };
 
 const MAX_ERRORS_KEPT = 10;
@@ -201,13 +202,18 @@ export function filterAttendees(flow: FlowRow, attendees: GroupedAttendee[]): Gr
 /* ---------- actions ---------- */
 
 // Runs `fn` for each attendee, counting successes/failures - one attendee failing never stops the rest.
+// skipEmails: emails already succeeded in a prior run — they're counted as skipped, not re-processed.
 async function perAttendee(
   summary: ActionSummary,
   attendees: GroupedAttendee[],
   fn: (a: GroupedAttendee) => Promise<void>,
-  opts: { requireEmail?: boolean } = {}
+  opts: { requireEmail?: boolean; skipEmails?: Set<string> } = {}
 ): Promise<void> {
   for (const a of attendees) {
+    if (opts.skipEmails && a.email && opts.skipEmails.has(a.email)) {
+      summary.skipped++;
+      continue;
+    }
     if (opts.requireEmail && !a.email) {
       summary.skipped++;
       continue;
@@ -215,6 +221,7 @@ async function perAttendee(
     try {
       await fn(a);
       summary.succeeded++;
+      if (a.email) summary.succeededEmails.push(a.email);
     } catch (err) {
       summary.failed++;
       if (summary.errors.length < MAX_ERRORS_KEPT) summary.errors.push(`${a.email || a.name}: ${errorMessage(err)}`);
@@ -222,8 +229,8 @@ async function perAttendee(
   }
 }
 
-async function runAction(env: Bindings, flow: FlowRow, event: EventRow, action: FlowAction, attendees: GroupedAttendee[]): Promise<ActionSummary> {
-  const summary: ActionSummary = { type: action.type, succeeded: 0, failed: 0, skipped: 0, errors: [] };
+async function runAction(env: Bindings, flow: FlowRow, event: EventRow, action: FlowAction, attendees: GroupedAttendee[], skipEmails?: Set<string>): Promise<ActionSummary> {
+  const summary: ActionSummary = { type: action.type, succeeded: 0, failed: 0, skipped: 0, errors: [], succeededEmails: [] };
   try {
     switch (action.type) {
       case "ghl": {
@@ -244,32 +251,44 @@ async function runAction(env: Bindings, flow: FlowRow, event: EventRow, action: 
             if (action.tags.length) await addTags(env, contact.id, action.tags);
             if (action.workflowId) await enrollInWorkflow(env, contact.id, action.workflowId);
           },
-          { requireEmail: true }
+          { requireEmail: true, skipEmails }
         );
         break;
       }
       case "hyros": {
-        await perAttendee(summary, attendees, (a) => hyrosTagLead(env, { email: a.email, tags: action.tags, source: action.source }), { requireEmail: true });
+        await perAttendee(summary, attendees, (a) => hyrosTagLead(env, { email: a.email, tags: action.tags, source: action.source }), { requireEmail: true, skipEmails });
         break;
       }
       case "sheets": {
         if (!action.spreadsheetId || !action.sheetName) throw new Error("Spreadsheet ID and sheet name are required");
-        const rows = attendees.map((a) => {
-          const tokens = attendeeTokens(a, event);
-          return action.columns.map((c) => renderAttendeeMapping(c, tokens));
-        });
-        await appendRows(env, { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, rows });
-        summary.succeeded = rows.length;
+        // Bulk append: exclude rows for attendees already succeeded in a prior run.
+        const toAppend = skipEmails ? attendees.filter((a) => !a.email || !skipEmails.has(a.email)) : attendees;
+        summary.skipped = attendees.length - toAppend.length;
+        if (toAppend.length > 0) {
+          const rows = toAppend.map((a) => {
+            const tokens = attendeeTokens(a, event);
+            return action.columns.map((c) => renderAttendeeMapping(c, tokens));
+          });
+          await appendRows(env, { spreadsheetId: action.spreadsheetId, sheetName: action.sheetName, rows });
+          summary.succeeded = rows.length;
+          summary.succeededEmails = toAppend.filter((a) => a.email).map((a) => a.email);
+        }
         break;
       }
       case "webhook": {
         if (!action.url) throw new Error("Webhook URL is required");
         const flowInfo = { id: flow.id, name: flow.name };
         if (action.mode === "bulk") {
-          await forwardWebhook(action.url, { event: "attendees.processed", flow: flowInfo, webinar: webinarInfo(event), attendeeCount: attendees.length, attendees });
-          summary.succeeded = attendees.length;
+          // Bulk webhook: exclude attendees already succeeded in a prior run.
+          const toSend = skipEmails ? attendees.filter((a) => !a.email || !skipEmails.has(a.email)) : attendees;
+          summary.skipped = attendees.length - toSend.length;
+          if (toSend.length > 0) {
+            await forwardWebhook(action.url, { event: "attendees.processed", flow: flowInfo, webinar: webinarInfo(event), attendeeCount: toSend.length, attendees: toSend });
+            summary.succeeded = toSend.length;
+            summary.succeededEmails = toSend.filter((a) => a.email).map((a) => a.email);
+          }
         } else {
-          await perAttendee(summary, attendees, (a) => forwardWebhook(action.url, { event: "attendee.processed", flow: flowInfo, webinar: webinarInfo(event), attendee: a }));
+          await perAttendee(summary, attendees, (a) => forwardWebhook(action.url, { event: "attendee.processed", flow: flowInfo, webinar: webinarInfo(event), attendee: a }), { skipEmails });
         }
         break;
       }
@@ -284,7 +303,7 @@ async function runAction(env: Bindings, flow: FlowRow, event: EventRow, action: 
 
 /* ---------- running a flow ---------- */
 
-export async function runFlow(db: Db, env: Bindings, flow: FlowRow, event: EventRow, trigger: "auto" | "manual") {
+export async function runFlow(db: Db, env: Bindings, flow: FlowRow, event: EventRow, trigger: "auto" | "manual", opts: { priorSummaries?: ActionSummary[] } = {}) {
   const runId = crypto.randomUUID();
   await db.insert(schema.attendeeFlowRuns).values({ id: runId, flowId: flow.id, zoomEventId: event.id, trigger });
 
@@ -293,8 +312,15 @@ export async function runFlow(db: Db, env: Bindings, flow: FlowRow, event: Event
     const attendees = filterAttendees(flow, await getGroupedAttendees(db, env, event));
     const actions = parseJson<FlowAction[]>(flow.actionsJson) ?? [];
 
+    // Build per-action skip sets from a prior partial run so we don't re-process attendees
+    // who already succeeded in each action.
+    const skipByType = new Map<string, Set<string>>();
+    for (const s of opts.priorSummaries ?? []) {
+      if (s.succeededEmails?.length) skipByType.set(s.type, new Set(s.succeededEmails));
+    }
+
     const summaries: ActionSummary[] = [];
-    for (const action of actions) summaries.push(await runAction(effEnv, flow, event, action, attendees));
+    for (const action of actions) summaries.push(await runAction(effEnv, flow, event, action, attendees, skipByType.get(action.type)));
 
     const anyFailed = summaries.some((s) => s.failed > 0);
     const allFailed = summaries.length > 0 && summaries.every((s) => s.failed > 0 && s.succeeded === 0);
