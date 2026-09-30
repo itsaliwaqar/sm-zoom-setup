@@ -1552,7 +1552,7 @@ const ATTENDEE_TOKEN_OPTIONS = [
   { value: "webinarDateEastern", label: "Webinar date (Eastern)" },
   { value: "webinarDateUtc", label: "Webinar date (UTC)" },
 ];
-const ACTION_LABELS = { ghl: "GHL", hyros: "Hyros", sheets: "Sheets", webhook: "Webhook", ghl_custom_field: "GHL Custom Fields" };
+const ACTION_LABELS = { ghl: "GHL", hyros: "Hyros", sheets: "Sheets", webhook: "Webhook" };
 
 function checkboxEl(checked = false) {
   const cb = el("input", { type: "checkbox", class: "rounded border-slate-300 dark:border-slate-600" });
@@ -1639,9 +1639,16 @@ async function tabFlows(section) {
   const ghlTagsEl = tagsInput("e.g. webinar-attended");
   const ghlWorkflowInput = input({ placeholder: "GHL workflow ID (optional)" });
   const ghlLocationInput = input({ placeholder: "optional - defaults to Settings" });
-  const ghlSection = actionSection("GHL - tag + enroll in workflow", ghlCb, "Upsert each attendee as a GHL contact, add tags, and enroll them in a workflow", [
+  const ghlFieldsMapper = buildMappingList(
+    (initial = {}) => buildGhlFieldPicker(initial, ghlCustomFields),
+    [],
+    "Add field",
+    ATTENDEE_TOKEN_OPTIONS
+  );
+  const ghlSection = actionSection("GHL - tag, enroll in workflow, update custom fields", ghlCb, "Upsert each attendee as a GHL contact, add tags, enroll in a workflow, and set custom field values", [
     field("Tags (comma-separated)", ghlTagsEl),
     el("div", { class: "grid sm:grid-cols-2 gap-3" }, [field("Workflow ID", ghlWorkflowInput), field("Location ID", ghlLocationInput)]),
+    field("Custom field mappings (optional)", ghlFieldsMapper.container),
     el("p", { class: "text-xs text-slate-400", text: "Tags are added before the workflow enrollment, so the workflow can branch on them. Attendees without an email in Zoom are skipped." }),
   ]);
 
@@ -1698,20 +1705,6 @@ async function tabFlows(section) {
     el("details", {}, [el("summary", { class: "text-xs text-slate-500 cursor-pointer", text: "Example payload" }), payloadExample]),
   ]);
 
-  const ghlCfCb = checkboxEl();
-  const ghlCfLocationInput = input({ placeholder: "optional - defaults to Settings" });
-  const ghlCfMapper = buildMappingList(
-    (initial = {}) => buildGhlFieldPicker(initial, ghlCustomFields),
-    [],
-    "Add field",
-    ATTENDEE_TOKEN_OPTIONS
-  );
-  const ghlCfSection = actionSection("GHL - update custom fields", ghlCfCb, "Upsert each attendee as a GHL contact and write values into the selected custom fields", [
-    field("Location ID", ghlCfLocationInput),
-    field("Field mappings", ghlCfMapper.container),
-    el("p", { class: "text-xs text-slate-400", text: "Each field value can be a computed token from Zoom (e.g. minutes attended, first join time) or a hardcoded static value. Attendees without an email are skipped." }),
-  ]);
-
   const submitBtn = btn("Create flow", { type: "submit", icon: "plus", cls: "justify-center sm:w-fit" });
   const cancelLink = el("button", { type: "button", class: "text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline hidden", text: "Cancel edit" });
 
@@ -1728,18 +1721,19 @@ async function tabFlows(section) {
     hyrosSection,
     sheetsSection,
     webhookSection,
-    ghlCfSection,
     el("div", { class: "flex items-center gap-4" }, [submitBtn, cancelLink]),
   ]);
   section.appendChild(card([el("div", { class: "p-5" }, form)], "mb-6"));
 
   function collectActions() {
     const actions = [];
-    if (ghlCb.checked) actions.push({ type: "ghl", tags: parseTags(ghlTagsEl), workflowId: ghlWorkflowInput.value.trim() || undefined, locationId: ghlLocationInput.value.trim() || undefined });
+    if (ghlCb.checked) {
+      const fields = ghlFieldsMapper.getRows().filter((r) => r.fieldId);
+      actions.push({ type: "ghl", tags: parseTags(ghlTagsEl), workflowId: ghlWorkflowInput.value.trim() || undefined, locationId: ghlLocationInput.value.trim() || undefined, fields: fields.length ? fields : undefined });
+    }
     if (hyrosCb.checked) actions.push({ type: "hyros", tags: parseTags(hyrosTagsEl), source: hyrosSourceInput.value.trim() || undefined });
     if (sheetsCb.checked) actions.push({ type: "sheets", spreadsheetId: sheetsIdInput.value.trim(), sheetName: sheetsNameInput.value.trim(), columns: sheetsMapper.getRows().filter((r) => r.header) });
     if (webhookCb.checked) actions.push({ type: "webhook", url: webhookUrlInput.value.trim(), mode: webhookModeSelect.value });
-    if (ghlCfCb.checked) actions.push({ type: "ghl_custom_field", locationId: ghlCfLocationInput.value.trim() || undefined, fields: ghlCfMapper.getRows().filter((r) => r.fieldId) });
     return actions;
   }
 
@@ -1748,8 +1742,8 @@ async function tabFlows(section) {
     form.reset();
     enabledCb.checked = true;
     autoRunCb.checked = true;
-    for (const cb of [ghlCb, hyrosCb, sheetsCb, webhookCb, ghlCfCb]) cb.checked = false;
-    ghlCfMapper.setRows([]);
+    for (const cb of [ghlCb, hyrosCb, sheetsCb, webhookCb]) cb.checked = false;
+    ghlFieldsMapper.setRows([]);
     sheetsMapper.setRows(defaultColumns);
     renderPayloadExample();
     submitBtn.querySelector("span").textContent = "Create flow";
@@ -1767,11 +1761,10 @@ async function tabFlows(section) {
     minMinutesInput.value = f.minMinutes ?? 0;
     excludeInput.value = (f.excludeEmailsJson ? JSON.parse(f.excludeEmailsJson) : []).join(", ");
     for (const a of JSON.parse(f.actionsJson || "[]")) {
-      if (a.type === "ghl") { ghlCb.checked = true; ghlTagsEl.value = (a.tags || []).join(", "); ghlWorkflowInput.value = a.workflowId || ""; ghlLocationInput.value = a.locationId || ""; ghlSection.open = true; }
+      if (a.type === "ghl") { ghlCb.checked = true; ghlTagsEl.value = (a.tags || []).join(", "); ghlWorkflowInput.value = a.workflowId || ""; ghlLocationInput.value = a.locationId || ""; ghlFieldsMapper.setRows(a.fields || []); ghlSection.open = true; }
       if (a.type === "hyros") { hyrosCb.checked = true; hyrosTagsEl.value = (a.tags || []).join(", "); hyrosSourceInput.value = a.source || ""; hyrosSection.open = true; }
       if (a.type === "sheets") { sheetsCb.checked = true; sheetsIdInput.value = a.spreadsheetId || ""; sheetsNameInput.value = a.sheetName || ""; sheetsMapper.setRows(a.columns || []); sheetsSection.open = true; }
       if (a.type === "webhook") { webhookCb.checked = true; webhookUrlInput.value = a.url || ""; webhookModeSelect.value = a.mode || "bulk"; webhookSection.open = true; }
-      if (a.type === "ghl_custom_field") { ghlCfCb.checked = true; ghlCfLocationInput.value = a.locationId || ""; ghlCfMapper.setRows(a.fields || []); ghlCfSection.open = true; }
     }
     renderPayloadExample();
     submitBtn.querySelector("span").textContent = "Update flow";

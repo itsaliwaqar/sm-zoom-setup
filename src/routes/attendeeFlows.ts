@@ -26,8 +26,7 @@ function validateActions(actions: unknown): string | null {
     if (a.type === "hyros" && !a.tags?.length) return "Hyros action needs at least one tag";
     if (a.type === "sheets" && (!a.spreadsheetId || !a.sheetName || !a.columns?.length)) return "Google Sheets action needs a spreadsheet ID, sheet name and at least one column";
     if (a.type === "webhook" && (!a.url || !["bulk", "individual"].includes(a.mode))) return "Webhook action needs a URL and a mode (bulk or individual)";
-    if (a.type === "ghl_custom_field" && !a.fields?.length) return "GHL custom fields action needs at least one field mapping";
-    if (!["ghl", "hyros", "sheets", "webhook", "ghl_custom_field"].includes(a.type)) return `unknown action type: ${(a as { type: string }).type}`;
+    if (!["ghl", "hyros", "sheets", "webhook"].includes(a.type)) return `unknown action type: ${(a as { type: string }).type}`;
   }
   return null;
 }
