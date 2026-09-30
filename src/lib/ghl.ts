@@ -32,7 +32,7 @@ export async function noShowTag(db: Db, env: Bindings): Promise<string> {
   return (await getSetting(db, "ghl_no_show_tag")) || env.GHL_NO_SHOW_TAG || "Webinar No-Show";
 }
 
-const GHL_MAX_RETRIES = 3;
+const GHL_MAX_RETRIES = 1;
 
 // Retries on 429 (GHL allows ~100 requests / 10s per location), which bulk jobs like attendee
 // flows can hit - waits for Retry-After when GHL sends one, otherwise backs off 2s, 4s, 8s.
